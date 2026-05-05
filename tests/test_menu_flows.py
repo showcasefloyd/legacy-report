@@ -549,12 +549,13 @@ class TestIssueViewDisplay:
                 "Amazing Spider-Man",  # search query
                 "",                    # blank to exit issue view
             )),
-            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")) as mock_select,
         ):
             from legacy_report.menu import search_collection
             search_collection()
 
         mock_table.assert_called()
+        mock_select.assert_called_once()
 
     def test_issue_view_blank_cancels_loop(self, session, seeded):
         """Blank input at the number prompt exits without showing any detail panel."""
