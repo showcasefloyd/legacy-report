@@ -858,6 +858,54 @@ class TestSearchCollectionSort:
         assert captured[1].id == issue_1_id
         assert captured[2].id == issue_2_id
 
+    def test_sort_lgy_number_reorders_out_of_sequence(self, session):
+        """LGY numbers '10' and '2' sort numerically (2 < 10), not lexicographically."""
+        series, _ = get_or_create_series(
+            session,
+            title="Avengers",
+            start_year=1998,
+            publisher="Marvel Comics",
+        )
+        # Seed lgy_10 with an earlier pub date so pub_date order is 10 → 2.
+        # The lgy_num sort must reorder to 2 → 10 to pass.
+        issue_lgy10 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1",
+            legacy_number="10",
+            publication_date=date(1998, 2, 1),
+        )
+        issue_lgy2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number="2",
+            publication_date=date(1998, 6, 1),
+        )
+        issue_lgy10_id = issue_lgy10.id
+        issue_lgy2_id = issue_lgy2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Avengers",  # search query
+                "",           # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("lgy_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].id == issue_lgy2_id   # lgy "2" comes first numerically
+        assert captured[1].id == issue_lgy10_id  # lgy "10" comes after "2"
+
 
 # ---------------------------------------------------------------------------
 # Tier 2: stats in header
