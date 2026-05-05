@@ -22,9 +22,11 @@ APP_NAME = "LEGACY REPORT"
 APP_VERSION = "v1.0"
 
 
-def print_header() -> None:
+def print_header(stats: str | None = None) -> None:
     title = Text(f"  {APP_NAME}  {APP_VERSION}  ", style="bold black on green")
     console.print(Panel(title, style="green", padding=(0, 2)))
+    if stats:
+        console.print(f"[muted]  {stats}[/muted]")
 
 
 def print_success(message: str) -> None:

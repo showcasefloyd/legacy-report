@@ -119,6 +119,7 @@ class TestEditIssueFlow:
                 "New Story Title",      # story_title
                 "",                     # writer
                 "",                     # artist
+                "",                     # Press Enter to continue
             )),
         ):
             from legacy_report.menu import edit_issue
@@ -148,6 +149,7 @@ class TestEditIssueFlow:
             "GC-Proof Title",       # call 5: story_title
             "",                     # call 6: writer
             "",                     # call 7: artist
+            "",                     # call 8: Press Enter to continue
         ]
 
         def gc_execute():
@@ -213,6 +215,7 @@ class TestEditIssueFlow:
                 "",
                 "Chris Claremont",
                 "John Byrne",
+                "",                 # Press Enter to continue
             )),
         ):
             from legacy_report.menu import edit_issue
@@ -430,6 +433,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # Press Enter to continue
             )),
         ):
             from legacy_report.menu import add_issue
@@ -440,6 +444,54 @@ class TestAddIssueDisplay:
         series = session.exec(sql_select(Series)).first()
         assert series is not None
         assert series.title == vols[0]["name"]
+
+    def test_add_issue_shows_detail_and_pauses_after_success(self, session):
+        """After a successful add, print_issue_detail is called and the 'Press Enter' pause fires."""
+        vols = self._FAKE_VOLUMES[:5]
+        fake_issue = {
+            "id": "999",
+            "issue_number": "42",
+            "name": "Spider-Man's New Foe",
+            "cover_date": "1965-07-01",
+            "description": "A great issue.",
+            "image": {},
+            "person_credits": [],
+        }
+        text_mock = _text_mock(
+            "Spider-Man",  # search query
+            "1",           # volume number selection
+            "1",           # CV issue number selection
+            "42",          # issue_number field
+            "",            # legacy_number
+            "1965-07-01",  # pub date
+            "",            # story_title
+            "",            # writer
+            "",            # artist
+            "",            # Press Enter to continue
+        )
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=[fake_issue]),
+            patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+            patch("legacy_report.menu.inquirer.text", text_mock) as mock_text,
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        # print_issue_detail must have been called once with the new issue and series
+        mock_detail.assert_called_once()
+        detail_issue, detail_series = mock_detail.call_args[0]
+        assert detail_issue.issue_number == "42"
+        assert detail_series.title == vols[0]["name"]
+
+        # The "Press Enter to continue" pause must have fired (10th inquirer.text call)
+        assert mock_text.call_count == 10
 
     def test_add_issue_invalid_number_returns_error(self, session):
         """Entering a number out of range shows an error; the loop continues so the user can retry."""
@@ -490,6 +542,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # Press Enter to continue
             )),
         ):
             from legacy_report.menu import add_issue
@@ -536,7 +589,7 @@ class TestIssueViewDisplay:
     """Guard that _paginated_issue_view uses Rich table + number prompt, not inquirer.select."""
 
     def test_issue_view_shows_table_not_select_list(self, session, seeded):
-        """Issue list must use Rich table + number prompt; inquirer.select must never be called."""
+        """Issue list must use Rich table + number prompt; inquirer.select is only used for sort."""
         with (
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.print_issues_table") as mock_table,
@@ -544,13 +597,13 @@ class TestIssueViewDisplay:
                 "Amazing Spider-Man",  # search query
                 "",                    # blank to exit issue view
             )),
-            patch("legacy_report.menu.inquirer.select") as mock_select,
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")) as mock_select,
         ):
             from legacy_report.menu import search_collection
             search_collection()
 
         mock_table.assert_called()
-        mock_select.assert_not_called()
+        mock_select.assert_called_once()
 
     def test_issue_view_blank_cancels_loop(self, session, seeded):
         """Blank input at the number prompt exits without showing any detail panel."""
@@ -560,6 +613,7 @@ class TestIssueViewDisplay:
                 "Amazing Spider-Man",  # search query
                 "",                    # blank to exit
             )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
         ):
             from legacy_report.menu import search_collection
@@ -577,6 +631,7 @@ class TestIssueViewDisplay:
                 "",                    # "Press Enter to go back" prompt
                 "",                    # blank to exit issue view loop
             )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
         ):
             from legacy_report.menu import search_collection
@@ -632,4 +687,307 @@ class TestBrowseCollectionDisplay:
             browse_collection()
 
         mock_issues_table.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: search_collection sort + cancel
+# ---------------------------------------------------------------------------
+
+class TestSearchCollectionSort:
+    """Verify sort choices re-order results and cancel exits before the issue view."""
+
+    def test_sort_by_issue_number(self, session, seeded):
+        """Choosing 'issue_num' sort orders issues numerically by issue_number."""
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].issue_number == "1"
+        assert captured[1].issue_number == "2"
+
+    def test_sort_by_lgy_number(self, session, seeded):
+        """Choosing 'lgy_num' sort orders issues numerically by legacy_number."""
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("lgy_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].legacy_number == "1"
+        assert captured[1].legacy_number == "2"
+
+    def test_sort_cancel_exits_before_issue_view(self, session, seeded):
+        """Choosing 'cancel' at the sort prompt returns without rendering the issue table."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
+            patch("legacy_report.menu.inquirer.select", _single_mock("cancel")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_table.assert_not_called()
+
+    def test_sort_issue_number_reorders_out_of_sequence(self, session):
+        """Issue numbers '10' and '2' sort numerically (2 < 10), not lexicographically."""
+        series, _ = get_or_create_series(
+            session,
+            title="X-Men",
+            start_year=1991,
+            publisher="Marvel Comics",
+        )
+        # Seed in reverse numeric order so pub_date order ≠ numeric order
+        issue_10 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="10",
+            legacy_number="10",
+            publication_date=date(1991, 3, 1),
+        )
+        issue_2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number="2",
+            publication_date=date(1991, 5, 1),
+        )
+        # Capture IDs before session state changes
+        issue_10_id = issue_10.id
+        issue_2_id = issue_2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "X-Men",  # search query
+                "",        # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].id == issue_2_id   # "2" comes first numerically
+        assert captured[1].id == issue_10_id  # "10" comes after "2"
+
+    def test_sort_fractional_issue_number(self, session):
+        """Issue number '1/2' sorts numerically between 0 and 1."""
+        series, _ = get_or_create_series(
+            session,
+            title="Wolverine",
+            start_year=1982,
+            publisher="Marvel Comics",
+        )
+        issue_half = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1/2",
+            legacy_number=None,
+            publication_date=date(1982, 1, 1),
+        )
+        issue_1 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1",
+            legacy_number=None,
+            publication_date=date(1982, 6, 1),
+        )
+        issue_2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number=None,
+            publication_date=date(1982, 9, 1),
+        )
+        issue_half_id = issue_half.id
+        issue_1_id = issue_1.id
+        issue_2_id = issue_2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Wolverine",  # search query
+                "",            # blank to exit
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 3
+        assert captured[0].id == issue_half_id  # 0.5 < 1 < 2
+        assert captured[1].id == issue_1_id
+        assert captured[2].id == issue_2_id
+
+    def test_sort_lgy_number_reorders_out_of_sequence(self, session):
+        """LGY numbers '10' and '2' sort numerically (2 < 10), not lexicographically."""
+        series, _ = get_or_create_series(
+            session,
+            title="Avengers",
+            start_year=1998,
+            publisher="Marvel Comics",
+        )
+        # Seed lgy_10 with an earlier pub date so pub_date order is 10 → 2.
+        # The lgy_num sort must reorder to 2 → 10 to pass.
+        issue_lgy10 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1",
+            legacy_number="10",
+            publication_date=date(1998, 2, 1),
+        )
+        issue_lgy2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number="2",
+            publication_date=date(1998, 6, 1),
+        )
+        issue_lgy10_id = issue_lgy10.id
+        issue_lgy2_id = issue_lgy2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Avengers",  # search query
+                "",           # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("lgy_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].id == issue_lgy2_id   # lgy "2" comes first numerically
+        assert captured[1].id == issue_lgy10_id  # lgy "10" comes after "2"
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: stats in header
+# ---------------------------------------------------------------------------
+
+class TestHeaderStats:
+    """Verify print_header receives a stats string reflecting collection counts."""
+
+    def test_header_stats_string(self, session, seeded):
+        """`_main_menu_loop` passes a stats string like '2 issues across 1 series'."""
+        captured_stats = []
+
+        def capture_header(stats=None):
+            captured_stats.append(stats)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_header", side_effect=capture_header),
+            patch("legacy_report.menu.inquirer.rawlist", _single_mock("quit")),
+        ):
+            from legacy_report.menu import _main_menu_loop
+            _main_menu_loop()
+
+        assert captured_stats, "print_header was never called"
+        stats = captured_stats[0]
+        assert "2 issue" in stats
+        assert "1 series" in stats
+
+    def test_header_stats_singular_issue(self, session, seeded):
+        """With exactly 1 issue, the string reads '1 issue' (not '1 issues')."""
+        # Delete issue2 so only issue1 remains
+        issue2 = seeded["issue2"]
+        session.delete(issue2)
+        session.commit()
+
+        captured_stats = []
+
+        def capture_header(stats=None):
+            captured_stats.append(stats)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_header", side_effect=capture_header),
+            patch("legacy_report.menu.inquirer.rawlist", _single_mock("quit")),
+        ):
+            from legacy_report.menu import _main_menu_loop
+            _main_menu_loop()
+
+        stats = captured_stats[0]
+        assert "1 issue " in stats or stats.startswith("1 issue")
+        assert "issues" not in stats
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: post-action confirmation (edit_issue shows detail panel)
+# ---------------------------------------------------------------------------
+
+class TestEditPostAction:
+    """Verify print_issue_detail is called after a successful edit."""
+
+    def test_edit_shows_detail_after_update(self, session, seeded):
+        issue = seeded["issue1"]
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",
+                "1",
+                issue.issue_number,
+                "",
+                "",
+                "Confirmed Title",
+                "",
+                "",
+                "",          # Press Enter to continue
+            )),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+        ):
+            from legacy_report.menu import edit_issue
+            edit_issue()
+
+        mock_detail.assert_called_once()
+        called_issue = mock_detail.call_args[0][0]
+        assert called_issue.story_title == "Confirmed Title"
 

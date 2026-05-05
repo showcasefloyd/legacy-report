@@ -2,11 +2,12 @@
 Main menu and all TUI flows for Legacy Report.
 """
 from datetime import datetime, date
+from fractions import Fraction
 from typing import Optional
 
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
-from sqlmodel import select, Session
+from sqlmodel import func, select, Session
 
 from legacy_report import comicvine
 from legacy_report.config import get_api_key, get_config, set_api_key
@@ -39,6 +40,19 @@ PAGE_SIZE = 50
 def _get_session() -> Session:
     """Create a session for direct use in menu flows."""
     return Session(get_engine(), expire_on_commit=False)
+
+
+def _sort_key_num(num_str: str | None) -> tuple:
+    """Numeric-aware sort key for issue/legacy number strings.
+
+    Handles integers, decimals (1.5), and fractions (1/2). Non-numeric
+    strings (e.g. 'Infinity') sort after all numeric values, lexicographically.
+    """
+    stripped_num = (num_str or "").strip()
+    try:
+        return (0, float(Fraction(stripped_num)))
+    except (ValueError, ZeroDivisionError):
+        return (1, stripped_num)
 
 
 def _build_series_map(session: Session, issues: list) -> dict:
@@ -247,11 +261,9 @@ def search_collection() -> None:
         return
 
     series_ids = [s.id for s in series_results]
-    issues = session.exec(
-        select(Issue)
-        .where(Issue.series_id.in_(series_ids))
-        .order_by(Issue.publication_date)
-    ).all()
+    issues = list(session.exec(
+        select(Issue).where(Issue.series_id.in_(series_ids))
+    ).all())
 
     series_map = {s.id: s for s in series_results}
 
@@ -259,6 +271,27 @@ def search_collection() -> None:
         print_muted("No issues found.")
         session.close()
         return
+
+    sort_choice = inquirer.select(
+        message=f"Found {len(issues)} issue(s). Sort by:",
+        choices=[
+            Choice(value="pub_date", name="Publication Date"),
+            Choice(value="issue_num", name="Issue #"),
+            Choice(value="lgy_num", name="LGY #"),
+            Choice(value="cancel", name="Cancel"),
+        ],
+    ).execute()
+
+    if sort_choice == "cancel":
+        session.close()
+        return
+
+    if sort_choice == "issue_num":
+        issues.sort(key=lambda i: _sort_key_num(i.issue_number))
+    elif sort_choice == "lgy_num":
+        issues.sort(key=lambda i: _sort_key_num(i.legacy_number))
+    else:  # pub_date
+        issues.sort(key=lambda i: i.publication_date or date.min)
 
     _paginated_issue_view(issues, series_map)
     session.close()
@@ -439,6 +472,8 @@ def add_issue() -> None:
         comicvine_id=str(selected_iss["id"]),
     )
     print_success(f"Added: {series.title} ({series.start_year}) #{issue.issue_number}")
+    print_issue_detail(issue, series)
+    inquirer.text(message="Press Enter to continue").execute()
     session.close()
 
 
@@ -495,7 +530,7 @@ def edit_issue() -> None:
     }
 
     fields = _prompt_issue_fields(defaults)
-    update_issue(
+    updated = update_issue(
         session,
         selected,
         issue_number=fields["issue_number"] or None,
@@ -505,7 +540,10 @@ def edit_issue() -> None:
         writer=fields["writer"] or None,
         artist=fields["artist"] or None,
     )
+    series = series_map.get(updated.series_id)
     print_success("Issue updated.")
+    print_issue_detail(updated, series)
+    inquirer.text(message="Press Enter to continue").execute()
     session.close()
 
 
@@ -612,7 +650,12 @@ def _main_menu_loop() -> None:
     while True:
         console.clear()
         console.print()
-        print_header()
+        _session = _get_session()
+        _issue_count = _session.exec(select(func.count()).select_from(Issue)).one()
+        _series_count = _session.exec(select(func.count()).select_from(Series)).one()
+        _session.close()
+        _stats = f"{_issue_count} issue{'s' if _issue_count != 1 else ''} across {_series_count} series"
+        print_header(_stats)
         console.print()
 
         action = inquirer.rawlist(
