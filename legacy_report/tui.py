@@ -890,12 +890,7 @@ class AddIssueScreen(Screen):
         self.dismiss(True)
 
     def action_go_back_or_cancel(self) -> None:
-        step_order = [
-            _WIZARD_STEP_SEARCH,
-            _WIZARD_STEP_VOLUMES,
-            _WIZARD_STEP_ISSUES,
-            _WIZARD_STEP_CONFIRM,
-        ]
+        step_order = [s[0] for s in _WIZARD_STEPS]
         idx = step_order.index(self._step) if self._step in step_order else 0
         if idx == 0:
             self.app.pop_screen()
