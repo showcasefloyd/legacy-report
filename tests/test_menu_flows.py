@@ -119,6 +119,7 @@ class TestEditIssueFlow:
                 "New Story Title",      # story_title
                 "",                     # writer
                 "",                     # artist
+                "",                     # Press Enter to continue
             )),
         ):
             from legacy_report.menu import edit_issue
@@ -148,6 +149,7 @@ class TestEditIssueFlow:
             "GC-Proof Title",       # call 5: story_title
             "",                     # call 6: writer
             "",                     # call 7: artist
+            "",                     # call 8: Press Enter to continue
         ]
 
         def gc_execute():
@@ -213,6 +215,7 @@ class TestEditIssueFlow:
                 "",
                 "Chris Claremont",
                 "John Byrne",
+                "",                 # Press Enter to continue
             )),
         ):
             from legacy_report.menu import edit_issue
@@ -430,6 +433,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # Press Enter to continue
             )),
         ):
             from legacy_report.menu import add_issue
@@ -490,6 +494,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # Press Enter to continue
             )),
         ):
             from legacy_report.menu import add_issue
@@ -536,7 +541,7 @@ class TestIssueViewDisplay:
     """Guard that _paginated_issue_view uses Rich table + number prompt, not inquirer.select."""
 
     def test_issue_view_shows_table_not_select_list(self, session, seeded):
-        """Issue list must use Rich table + number prompt; inquirer.select must never be called."""
+        """Issue list must use Rich table + number prompt; inquirer.select is only used for sort."""
         with (
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.print_issues_table") as mock_table,
@@ -544,13 +549,12 @@ class TestIssueViewDisplay:
                 "Amazing Spider-Man",  # search query
                 "",                    # blank to exit issue view
             )),
-            patch("legacy_report.menu.inquirer.select") as mock_select,
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
         ):
             from legacy_report.menu import search_collection
             search_collection()
 
         mock_table.assert_called()
-        mock_select.assert_not_called()
 
     def test_issue_view_blank_cancels_loop(self, session, seeded):
         """Blank input at the number prompt exits without showing any detail panel."""
@@ -560,6 +564,7 @@ class TestIssueViewDisplay:
                 "Amazing Spider-Man",  # search query
                 "",                    # blank to exit
             )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
         ):
             from legacy_report.menu import search_collection
@@ -577,6 +582,7 @@ class TestIssueViewDisplay:
                 "",                    # "Press Enter to go back" prompt
                 "",                    # blank to exit issue view loop
             )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("pub_date")),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
         ):
             from legacy_report.menu import search_collection
@@ -632,4 +638,156 @@ class TestBrowseCollectionDisplay:
             browse_collection()
 
         mock_issues_table.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: search_collection sort + cancel
+# ---------------------------------------------------------------------------
+
+class TestSearchCollectionSort:
+    """Verify sort choices re-order results and cancel exits before the issue view."""
+
+    def test_sort_by_issue_number(self, session, seeded):
+        """Choosing 'issue_num' sort orders issues numerically by issue_number."""
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].issue_number == "1"
+        assert captured[1].issue_number == "2"
+
+    def test_sort_by_lgy_number(self, session, seeded):
+        """Choosing 'lgy_num' sort orders issues numerically by legacy_number."""
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("lgy_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].legacy_number == "1"
+        assert captured[1].legacy_number == "2"
+
+    def test_sort_cancel_exits_before_issue_view(self, session, seeded):
+        """Choosing 'cancel' at the sort prompt returns without rendering the issue table."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
+            patch("legacy_report.menu.inquirer.select", _single_mock("cancel")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_table.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: stats in header
+# ---------------------------------------------------------------------------
+
+class TestHeaderStats:
+    """Verify print_header receives a stats string reflecting collection counts."""
+
+    def test_header_stats_string(self, session, seeded):
+        """`_main_menu_loop` passes a stats string like '2 issues across 1 series'."""
+        captured_stats = []
+
+        def capture_header(stats=None):
+            captured_stats.append(stats)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_header", side_effect=capture_header),
+            patch("legacy_report.menu.inquirer.rawlist", _single_mock("quit")),
+        ):
+            from legacy_report.menu import _main_menu_loop
+            _main_menu_loop()
+
+        assert captured_stats, "print_header was never called"
+        stats = captured_stats[0]
+        assert "2 issue" in stats
+        assert "1 series" in stats
+
+    def test_header_stats_singular_issue(self, session, seeded):
+        """With exactly 1 issue, the string reads '1 issue' (not '1 issues')."""
+        # Delete issue2 so only issue1 remains
+        issue2 = seeded["issue2"]
+        session.delete(issue2)
+        session.commit()
+
+        captured_stats = []
+
+        def capture_header(stats=None):
+            captured_stats.append(stats)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_header", side_effect=capture_header),
+            patch("legacy_report.menu.inquirer.rawlist", _single_mock("quit")),
+        ):
+            from legacy_report.menu import _main_menu_loop
+            _main_menu_loop()
+
+        stats = captured_stats[0]
+        assert "1 issue " in stats or stats.startswith("1 issue")
+        assert "issues" not in stats
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: post-action confirmation (edit_issue shows detail panel)
+# ---------------------------------------------------------------------------
+
+class TestEditPostAction:
+    """Verify print_issue_detail is called after a successful edit."""
+
+    def test_edit_shows_detail_after_update(self, session, seeded):
+        issue = seeded["issue1"]
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",
+                "1",
+                issue.issue_number,
+                "",
+                "",
+                "Confirmed Title",
+                "",
+                "",
+                "",          # Press Enter to continue
+            )),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+        ):
+            from legacy_report.menu import edit_issue
+            edit_issue()
+
+        mock_detail.assert_called_once()
+        called_issue = mock_detail.call_args[0][0]
+        assert called_issue.story_title == "Confirmed Title"
 

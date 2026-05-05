@@ -12,10 +12,10 @@
 
 ## Tier 2 — Small wins, no schema changes
 
-- [ ] Stats in header — show "X issues across Y series" in `print_header()` (two COUNT queries)
-- [ ] Sort options — after search, offer sort by Issue #, LGY #, or Pub Date (in-memory re-sort)
-- [ ] Consistent cancel paths — search flow lacks a back/cancel; add it to match edit/delete
-- [ ] Post-action confirmation — after Add/Edit, call `print_issue_detail()` instead of just a success toast
+- [x] Stats in header — show "X issues across Y series" in `print_header()` (two COUNT queries)
+- [x] Sort options — after search, offer sort by Issue #, LGY #, or Pub Date (in-memory re-sort)
+- [x] Consistent cancel paths — search flow now has sort prompt with explicit Cancel choice
+- [x] Post-action confirmation — after Add/Edit, call `print_issue_detail()` instead of just a success toast
 
 ## Tier 3 — Schema additions, medium effort
 
