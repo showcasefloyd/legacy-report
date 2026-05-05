@@ -6,9 +6,9 @@
 
 ## Tier 1 — Already planned, minimal effort
 
-- [ ] Fix search display — remove redundant `print_issues_table()` call in `search_collection()`; the InquirerPy select list already shows the same data
-- [ ] Browse mode — new menu item: list all Series with issue counts (one query, one Rich table)
-- [ ] Pagination — add page offset to DB queries + `[prev] / [next]` choices in selectors; target threshold: >100 results
+- [x] Fix search display — remove redundant `print_issues_table()` call in `search_collection()`; the InquirerPy select list already shows the same data
+- [x] Browse mode — new menu item: list all Series with issue counts (one query, one Rich table)
+- [x] Pagination — add page offset to DB queries + `[prev] / [next]` choices in selectors; target threshold: >100 results
 
 ## Tier 2 — Small wins, no schema changes
 

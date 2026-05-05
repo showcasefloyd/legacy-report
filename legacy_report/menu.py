@@ -10,7 +10,8 @@ from sqlmodel import select, Session
 
 from legacy_report import comicvine
 from legacy_report.config import get_api_key, get_config, set_api_key
-from legacy_report.db import get_session
+from legacy_report.db import get_engine, get_or_create_series, create_issue, update_issue
+from legacy_report.db import delete_issue as _db_delete_issue
 from legacy_report.publishers import filter_volumes_by_tier
 from legacy_report.display import (
     console,
@@ -20,10 +21,14 @@ from legacy_report.display import (
     print_issue_detail,
     print_issues_table,
     print_muted,
+    print_series_table,
     print_success,
     print_volumes_table,
 )
 from legacy_report.models import Issue, Series
+
+
+PAGE_SIZE = 50
 
 
 # ---------------------------------------------------------------------------
@@ -31,9 +36,8 @@ from legacy_report.models import Issue, Series
 # ---------------------------------------------------------------------------
 
 def _get_session() -> Session:
-    """Unwrap the generator-based get_session for direct use in menu flows."""
-    gen = get_session()
-    return next(gen)
+    """Create a session for direct use in menu flows."""
+    return Session(get_engine(), expire_on_commit=False)
 
 
 def _build_series_map(session: Session, issues: list) -> dict:
@@ -95,6 +99,46 @@ def _prompt_issue_fields(defaults: dict) -> dict:
     }
 
 
+def _paginated_issue_view(issues: list, series_map: dict) -> None:
+    """Display issues in pages with optional detail drill-down."""
+    total = len(issues)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = 0
+
+    while True:
+        start = page * PAGE_SIZE
+        page_issues = issues[start : start + PAGE_SIZE]
+
+        if total_pages > 1:
+            print_muted(f"Page {page + 1} of {total_pages}  ({total} issues total)")
+        print_issues_table(page_issues, series_map)
+
+        choices = [
+            Choice(
+                value=issue,
+                name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
+                     f"#{issue.issue_number} — {issue.publication_date or 'no date'}",
+            )
+            for issue in page_issues
+        ]
+        if page > 0:
+            choices.insert(0, Choice(value="__prev__", name="← Previous page"))
+        if page < total_pages - 1:
+            choices.append(Choice(value="__next__", name="Next page →"))
+        choices.append(Choice(value=None, name="Back"))
+
+        selected = inquirer.select(message="Select issue for detail:", choices=choices).execute()
+
+        if selected is None:
+            break
+        elif selected == "__prev__":
+            page -= 1
+        elif selected == "__next__":
+            page += 1
+        else:
+            print_issue_detail(selected, series_map.get(selected.series_id))
+
+
 # ---------------------------------------------------------------------------
 # Menu actions
 # ---------------------------------------------------------------------------
@@ -123,25 +167,50 @@ def search_collection() -> None:
     ).all()
 
     series_map = {s.id: s for s in series_results}
-    print_issues_table(issues, series_map)
 
     if not issues:
+        print_muted("No issues found.")
         session.close()
         return
 
-    view = inquirer.confirm(message="View detail on an issue?", default=False).execute()
-    if view:
-        choices = [
-            Choice(
-                value=issue,
-                name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
-                     f"#{issue.issue_number} — {issue.publication_date or 'no date'}",
-            )
-            for issue in issues
-        ]
-        selected = inquirer.select(message="Select issue:", choices=choices).execute()
-        print_issue_detail(selected, series_map.get(selected.series_id))
+    _paginated_issue_view(issues, series_map)
+    session.close()
 
+
+def browse_collection() -> None:
+    console.rule("[green]Browse Collection[/green]")
+    session = _get_session()
+
+    series_list = session.exec(select(Series).order_by(Series.title)).all()
+    if not series_list:
+        print_muted("Your collection is empty. Use Add Issue to get started.")
+        session.close()
+        return
+
+    all_issues = session.exec(select(Issue)).all()
+    counts: dict = {}
+    for issue in all_issues:
+        counts[issue.series_id] = counts.get(issue.series_id, 0) + 1
+
+    print_series_table(series_list, counts)
+
+    choices = [
+        Choice(
+            value=s,
+            name=f"{s.title} ({s.start_year}) — {counts.get(s.id, 0)} issues",
+        )
+        for s in series_list
+    ]
+    choices.append(Choice(value=None, name="Back"))
+    selected_series = inquirer.select(message="Select series to view issues:", choices=choices).execute()
+
+    if selected_series is None:
+        session.close()
+        return
+
+    series_issues = [i for i in all_issues if i.series_id == selected_series.id]
+    series_issues.sort(key=lambda i: i.publication_date or date.min)
+    _paginated_issue_view(series_issues, {selected_series.id: selected_series})
     session.close()
 
 
@@ -241,40 +310,28 @@ def add_issue() -> None:
     publisher_name = publisher_data.get("name")
     start_year = selected_vol.get("start_year") or 0
 
-    existing_series = session.exec(
-        select(Series).where(
-            Series.title == selected_vol["name"],
-            Series.start_year == start_year,
-        )
-    ).first()
+    series, _ = get_or_create_series(
+        session,
+        title=selected_vol["name"],
+        start_year=start_year,
+        publisher=publisher_name,
+        comicvine_id=str(selected_vol["id"]),
+        description=selected_vol.get("description"),
+    )
 
-    if existing_series:
-        series = existing_series
-    else:
-        series = Series(
-            title=selected_vol["name"],
-            start_year=start_year,
-            publisher=publisher_name,
-            comicvine_id=str(selected_vol["id"]),
-            description=selected_vol.get("description"),
-        )
-        session.add(series)
-        session.flush()
-
-    issue = Issue(
+    issue = create_issue(
+        session,
         series_id=series.id,
         issue_number=fields["issue_number"],
-        legacy_number=fields["legacy_number"],
+        legacy_number=fields["legacy_number"] or None,
         publication_date=fields["publication_date"],
-        story_title=fields["story_title"],
-        writer=fields["writer"],
-        artist=fields["artist"],
+        story_title=fields["story_title"] or None,
+        writer=fields["writer"] or None,
+        artist=fields["artist"] or None,
         description=selected_iss.get("description"),
         cover_image_url=(selected_iss.get("image") or {}).get("medium_url"),
         comicvine_id=str(selected_iss["id"]),
     )
-    session.add(issue)
-    session.commit()
     print_success(f"Added: {series.title} ({series.start_year}) #{issue.issue_number}")
     session.close()
 
@@ -311,16 +368,23 @@ def edit_issue() -> None:
 
     choices = [
         Choice(
-            value=issue,
+            value=issue.id,
             name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
                  f"#{issue.issue_number} LGY#{issue.legacy_number or '—'} — {issue.publication_date or 'no date'}",
         )
         for issue in issues
     ]
     choices.append(Choice(value=None, name="Cancel"))
-    selected = inquirer.select(message="Select issue to edit:", choices=choices).execute()
+    selected_id = inquirer.select(message="Select issue to edit:", choices=choices).execute()
 
+    if selected_id is None:
+        session.close()
+        return
+
+    # Re-fetch by ID to get a fresh, session-bound instance not subject to GC
+    selected = session.get(Issue, selected_id)
     if selected is None:
+        print_error("Issue no longer exists.")
         session.close()
         return
 
@@ -334,15 +398,16 @@ def edit_issue() -> None:
     }
 
     fields = _prompt_issue_fields(defaults)
-    selected.issue_number = fields["issue_number"]
-    selected.legacy_number = fields["legacy_number"]
-    selected.publication_date = fields["publication_date"]
-    selected.story_title = fields["story_title"]
-    selected.writer = fields["writer"]
-    selected.artist = fields["artist"]
-    selected.updated_at = datetime.utcnow()
-    session.add(selected)
-    session.commit()
+    update_issue(
+        session,
+        selected,
+        issue_number=fields["issue_number"] or None,
+        legacy_number=fields["legacy_number"] or None,
+        publication_date=fields["publication_date"],
+        story_title=fields["story_title"] or None,
+        writer=fields["writer"] or None,
+        artist=fields["artist"] or None,
+    )
     print_success("Issue updated.")
     session.close()
 
@@ -379,16 +444,23 @@ def delete_issue() -> None:
 
     choices = [
         Choice(
-            value=issue,
+            value=issue.id,
             name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
                  f"#{issue.issue_number} — {issue.publication_date or 'no date'}",
         )
         for issue in issues
     ]
     choices.append(Choice(value=None, name="Cancel"))
-    selected = inquirer.select(message="Select issue to delete:", choices=choices).execute()
+    selected_id = inquirer.select(message="Select issue to delete:", choices=choices).execute()
 
+    if selected_id is None:
+        session.close()
+        return
+
+    # Re-fetch by ID to get a fresh, session-bound instance not subject to GC
+    selected = session.get(Issue, selected_id)
     if selected is None:
+        print_error("Issue no longer exists.")
         session.close()
         return
 
@@ -399,8 +471,7 @@ def delete_issue() -> None:
     ).execute()
 
     if confirmed:
-        session.delete(selected)
-        session.commit()
+        _db_delete_issue(session, selected)
         print_success(f"Deleted: {label}")
     else:
         print_muted("Cancelled.")
@@ -460,6 +531,7 @@ def _main_menu_loop() -> None:
             message="Main Menu",
             choices=[
                 Choice(value="search", name="Search My Collection"),
+                Choice(value="browse", name="Browse Collection"),
                 Choice(value="add", name="Add Issue"),
                 Choice(value="edit", name="Edit Issue"),
                 Choice(value="delete", name="Delete Issue"),
@@ -470,6 +542,8 @@ def _main_menu_loop() -> None:
 
         if action == "search":
             search_collection()
+        elif action == "browse":
+            browse_collection()
         elif action == "add":
             add_issue()
         elif action == "edit":

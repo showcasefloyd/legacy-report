@@ -79,6 +79,36 @@ def print_issues_table(issues: list, series_map: dict) -> None:
     console.print(table)
 
 
+def print_series_table(series_list: list, counts: dict) -> None:
+    """Render a Rich table of Series rows. counts: {series_id: issue_count}"""
+    if not series_list:
+        console.print("[muted]No series found.[/muted]")
+        return
+
+    table = Table(
+        show_header=True,
+        header_style="bold green",
+        border_style="green",
+        style="green",
+    )
+    table.add_column("#", style="dim green", width=4)
+    table.add_column("Title", style="green", min_width=25)
+    table.add_column("Publisher", style="dim green", width=14)
+    table.add_column("Start Year", style="green", width=10)
+    table.add_column("Issues", style="bold yellow", width=7)
+
+    for idx, series in enumerate(series_list, 1):
+        table.add_row(
+            str(idx),
+            series.title,
+            series.publisher or "—",
+            str(series.start_year) if series.start_year else "—",
+            str(counts.get(series.id, 0)),
+        )
+
+    console.print(table)
+
+
 def print_issue_detail(issue, series) -> None:
     """Print a single issue's full detail in a panel."""
     series_label = f"{series.title} ({series.start_year})" if series else "Unknown"

@@ -116,21 +116,52 @@ This project uses **pytest**.
 
 ```bash
 # Run all tests
-pytest
+.venv/bin/pytest tests/
 
 # Run a specific test file
-pytest tests/test_commands.py
+.venv/bin/pytest tests/test_collection.py
 
-# Run with output (useful for CLI-heavy tests)
-pytest -s
+# Run with output (useful for debugging)
+.venv/bin/pytest tests/ -s
 
 # Run with coverage (if pytest-cov is installed)
-pytest --cov=. --cov-report=term-missing
+.venv/bin/pytest --cov=. --cov-report=term-missing
 ```
 
-**Always run the full test suite before and after making changes.** If tests fail before your changes, note it — don't mask pre-existing failures.
+**Tests are not optional.** Every code change must be accompanied by tests that verify the change works. This is non-negotiable — do not declare a change "done" until:
 
-When adding new features, add a corresponding test in `tests/`. Match the existing test file naming convention.
+1. You have written tests covering the new or modified behavior
+2. You have run the full test suite and it passes
+3. You have confirmed the previously-passing tests still pass
+
+**Two test layers are required for this project:**
+
+| Layer | File | What to test |
+|-------|------|--------------|
+| Data layer | `tests/test_collection.py` | CRUD functions in `db.py` — use an in-memory SQLite session, no mocks |
+| Menu layer | `tests/test_menu_flows.py` | Full menu flows with mocked InquirerPy prompts + `gc.collect()` between select and mutate steps |
+
+The menu layer tests exist specifically to catch `ObjectDereferencedError` and session lifecycle bugs that the data layer tests cannot see — InquirerPy runs an asyncio event loop between prompts, which gives CPython's GC a chance to collect SQLAlchemy weak references. Always include a GC pressure test when adding a new menu flow that mutates data.
+
+**Mock pattern for InquirerPy in tests:**
+
+```python
+# Multiple sequential text prompts — put values on execute.side_effect
+def _text_mock(*values):
+    m = MagicMock()
+    m.return_value.execute.side_effect = list(values)
+    return m
+
+# Single select / confirm prompt
+def _single_mock(return_value):
+    m = MagicMock()
+    m.return_value.execute.return_value = return_value
+    return m
+```
+
+Always store ORM object IDs before a menu flow runs — `session.close()` at the end of a flow detaches all objects, and accessing attributes on a detached object raises `DetachedInstanceError`.
+
+If tests fail before your change, note it explicitly — don't mask pre-existing failures.
 
 ---
 
@@ -138,18 +169,21 @@ When adding new features, add a corresponding test in `tests/`. Match the existi
 
 Because Legacy Report is menu-driven, agents cannot automate end-to-end flows through the UI. Use this approach instead:
 
-**For logic and data changes — use pytest:**
+**For logic and data changes — write tests first, then run them:**
 
 ```bash
-pytest tests/                          # full suite
-pytest tests/test_collection.py -s    # specific module, with output
+.venv/bin/pytest tests/                          # full suite
+.venv/bin/pytest tests/test_collection.py -s    # specific module, with output
+.venv/bin/pytest tests/test_menu_flows.py -s    # menu-level flows
 ```
+
+A change is not verified until the test suite is green. Syntax checking (`python -m py_compile`) and reading code are not substitutes for running tests.
 
 **For database changes — use sqlite3 to inspect state:**
 
 ```bash
 sqlite3 collection.db ".schema"
-sqlite3 collection.db "SELECT * FROM comics ORDER BY id DESC LIMIT 5;"
+sqlite3 collection.db "SELECT * FROM issue ORDER BY id DESC LIMIT 5;"
 ```
 
 **For UI / prompt changes** — manually run `legacy_report` and navigate to the affected menu. Note what you observed in your PR or commit message.
@@ -193,6 +227,8 @@ Update this tree if the structure changes significantly.
 - **Don't hardcode file paths** — use `pathlib.Path` and derive paths relative to the project root.
 - **Don't write directly to `collection.db`** to simulate app behavior — use pytest to test the underlying functions, and `sqlite3` to inspect state.
 - **Don't skip tests** to make a change "simpler." Write the test.
+- **Don't declare a change done** without running the full test suite and confirming it passes.
+- **Don't rely on syntax checks or code reading** as a substitute for running tests — tests catch runtime bugs that static analysis cannot.
 - **Don't use an MCP** when a CLI tool (`gh`, `sqlite3`, `grep`, etc.) can do the job.
 
 ---
