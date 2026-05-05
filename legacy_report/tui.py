@@ -184,10 +184,10 @@ class EditIssueScreen(ModalScreen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     EditIssueScreen .field-input:focus {
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     EditIssueScreen #edit-buttons {
         height: 3;
@@ -197,14 +197,15 @@ class EditIssueScreen(ModalScreen):
     EditIssueScreen Button {
         margin-left: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 14;
+        content-align: center middle;
     }
     EditIssueScreen Button:focus,
     EditIssueScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     EditIssueScreen #btn-save {
         background: #003300;
@@ -359,10 +360,10 @@ class ConfigScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     ConfigScreen .cfg-input:focus {
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     ConfigScreen #cfg-buttons {
         height: 3;
@@ -372,14 +373,15 @@ class ConfigScreen(Screen):
     ConfigScreen Button {
         margin-right: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 18;
+        content-align: center middle;
     }
     ConfigScreen Button:focus,
     ConfigScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     ConfigScreen #cfg-status {
         margin-top: 1;
@@ -507,24 +509,10 @@ class AddIssueScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     AddIssueScreen .wiz-input:focus {
-        border: tall #00ff41;
-    }
-    AddIssueScreen DataTable {
-        height: 1fr;
-        background: #0d0d0d;
-    }
-    AddIssueScreen DataTable > .datatable--header {
-        background: #001a00;
-        color: #00ff41;
-        text-style: bold;
-    }
-    AddIssueScreen DataTable > .datatable--cursor {
-        background: #004400;
-        color: #00ff41;
-        text-style: bold;
+        border: solid #00ff41;
     }
     AddIssueScreen LoadingIndicator {
         background: #0d0d0d;
@@ -541,9 +529,9 @@ class AddIssueScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
-    AddIssueScreen .field-input:focus { border: tall #00ff41; }
+    AddIssueScreen .field-input:focus { border: solid #00ff41; }
     AddIssueScreen #wiz-buttons {
         height: 3;
         margin-top: 1;
@@ -552,14 +540,15 @@ class AddIssueScreen(Screen):
     AddIssueScreen Button {
         margin-right: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 16;
+        content-align: center middle;
     }
     AddIssueScreen Button:focus,
     AddIssueScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     AddIssueScreen #lgy-hint {
         color: #00aa22;
@@ -724,11 +713,11 @@ class AddIssueScreen(Screen):
         self._volumes = volumes
         table = self.query_one("#wiz-volumes-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("#", "Title", "Year", "Publisher", "Issues")
-        for i, v in enumerate(volumes, 1):
+        table.add_columns("Title", "Year", "Publisher", "Issues")
+        for v in volumes:
             pub = (v.get("publisher") or {}).get("name", "—")
             table.add_row(
-                str(i), v.get("name", "—"),
+                v.get("name", "—"),
                 str(v.get("start_year") or "—"),
                 pub,
                 str(v.get("count_of_issues", "—")),
@@ -755,10 +744,9 @@ class AddIssueScreen(Screen):
         self._cv_issues = issues
         table = self.query_one("#wiz-issues-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("#", "Issue #", "Story Title", "Cover Date")
-        for i, iss in enumerate(issues, 1):
+        table.add_columns("Issue #", "Story Title", "Cover Date")
+        for iss in issues:
             table.add_row(
-                str(i),
                 iss.get("issue_number", "—"),
                 iss.get("name") or "—",
                 iss.get("cover_date", "—"),
@@ -951,24 +939,37 @@ class LegacyReportApp(App):
         display: none;
         height: 3;
         background: #001a00;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         margin: 0;
         padding: 0 1;
     }
-    #search-input:focus { border: tall #00ff41; }
-    DataTable { background: #0d0d0d; }
+    #search-input:focus { border: solid #00ff41; }
+    DataTable { background: #0d0d0d; border: none; }
     DataTable > .datatable--header {
         background: #001a00;
         color: #00ff41;
         text-style: bold;
+    }
+    DataTable > .datatable--header-cursor {
+        background: #004400;
+        color: #00ff41;
+        text-style: bold;
+    }
+    DataTable > .datatable--odd-row {
+        background: #0d0d0d;
+        color: #00ff41;
+    }
+    DataTable > .datatable--even-row {
+        background: #001500;
+        color: #00cc33;
     }
     DataTable > .datatable--cursor {
         background: #004400;
         color: #00ff41;
         text-style: bold;
     }
-    DataTable > .datatable--hover { background: #002200; }
+    DataTable > .datatable--hover { background: #002200; color: #00ff41; }
     Footer {
         background: #001a00;
         color: #00cc33;

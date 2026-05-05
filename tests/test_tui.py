@@ -419,8 +419,8 @@ async def test_add_issue_search_shows_volumes(mem_engine):
             screen._volumes = fake_volumes
             table = screen.query_one("#wiz-volumes-table", DataTable)
             table.clear(columns=True)
-            table.add_columns("#", "Title", "Year", "Publisher", "Issues")
-            table.add_row("1", "Amazing Spider-Man", "1963", "Marvel", "441")
+            table.add_columns("Title", "Year", "Publisher", "Issues")
+            table.add_row("Amazing Spider-Man", "1963", "Marvel", "441")
             screen._show_step(_WIZARD_STEP_VOLUMES)
             await pilot.pause()
 
