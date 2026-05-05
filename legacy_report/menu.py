@@ -2,6 +2,7 @@
 Main menu and all TUI flows for Legacy Report.
 """
 from datetime import datetime, date
+from fractions import Fraction
 from typing import Optional
 
 from InquirerPy import inquirer
@@ -47,12 +48,11 @@ def _sort_key_num(num_str: str | None) -> tuple:
     Handles integers, decimals (1.5), and fractions (1/2). Non-numeric
     strings (e.g. 'Infinity') sort after all numeric values, lexicographically.
     """
-    from fractions import Fraction
-    s = (num_str or "").strip()
+    stripped_num = (num_str or "").strip()
     try:
-        return (0, float(Fraction(s)))
+        return (0, float(Fraction(stripped_num)))
     except (ValueError, ZeroDivisionError):
-        return (1, s)
+        return (1, stripped_num)
 
 
 def _build_series_map(session: Session, issues: list) -> dict:
