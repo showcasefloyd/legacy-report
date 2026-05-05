@@ -379,6 +379,27 @@ async def test_add_issue_escape_cancels(mem_engine):
 
 
 @pytest.mark.asyncio
+async def test_add_issue_search_requires_api_key(mem_engine):
+    """Submitting a search without an API key shows an error and stays on step 1."""
+    from legacy_report.tui import _WIZARD_STEP_SEARCH
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        with patch("legacy_report.tui.get_api_key", return_value=""):
+            async with LegacyReportApp().run_test(headless=True) as pilot:
+                await pilot.app.action_do_add()
+                await pilot.pause()
+                screen = pilot.app.screen
+                assert isinstance(screen, AddIssueScreen)
+
+                search_input = screen.query_one("#wiz-search-input", Input)
+                search_input.value = "Batman"
+                screen.on_input_submitted(Input.Submitted(search_input, "Batman"))
+                await pilot.pause()
+
+                # Wizard must remain on the search step — no API call made
+                assert screen._step == _WIZARD_STEP_SEARCH
+
+
+@pytest.mark.asyncio
 async def test_add_issue_search_shows_volumes(mem_engine):
     """After volumes are loaded the wizard transitions to step 2 and fills the table."""
     fake_volumes = [

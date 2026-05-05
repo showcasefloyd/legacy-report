@@ -672,6 +672,13 @@ class AddIssueScreen(Screen):
         if event.input.id == "wiz-search-input" and self._step == _WIZARD_STEP_SEARCH:
             query = event.value.strip()
             if query:
+                if not get_api_key():
+                    self.notify(
+                        "No ComicVine API key set. Go to Config (c) and set your API key first.",
+                        title="API Key Required",
+                        severity="error",
+                    )
+                    return
                 self._show_loading()
                 self.run_worker(self._fetch_volumes(query), exclusive=True)
 
