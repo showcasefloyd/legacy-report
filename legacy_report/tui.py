@@ -200,6 +200,7 @@ class EditIssueScreen(ModalScreen):
         border: solid #1a6e1a;
         color: #00ff41;
         min-width: 14;
+        content-align: center middle;
     }
     EditIssueScreen Button:focus,
     EditIssueScreen Button:hover {
@@ -375,6 +376,7 @@ class ConfigScreen(Screen):
         border: solid #1a6e1a;
         color: #00ff41;
         min-width: 18;
+        content-align: center middle;
     }
     ConfigScreen Button:focus,
     ConfigScreen Button:hover {
@@ -573,6 +575,7 @@ class AddIssueScreen(Screen):
         border: solid #1a6e1a;
         color: #00ff41;
         min-width: 16;
+        content-align: center middle;
     }
     AddIssueScreen Button:focus,
     AddIssueScreen Button:hover {
