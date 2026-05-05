@@ -184,10 +184,10 @@ class EditIssueScreen(ModalScreen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     EditIssueScreen .field-input:focus {
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     EditIssueScreen #edit-buttons {
         height: 3;
@@ -197,14 +197,14 @@ class EditIssueScreen(ModalScreen):
     EditIssueScreen Button {
         margin-left: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 14;
     }
     EditIssueScreen Button:focus,
     EditIssueScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     EditIssueScreen #btn-save {
         background: #003300;
@@ -359,10 +359,10 @@ class ConfigScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     ConfigScreen .cfg-input:focus {
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     ConfigScreen #cfg-buttons {
         height: 3;
@@ -372,14 +372,14 @@ class ConfigScreen(Screen):
     ConfigScreen Button {
         margin-right: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 18;
     }
     ConfigScreen Button:focus,
     ConfigScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     ConfigScreen #cfg-status {
         margin-top: 1;
@@ -507,10 +507,10 @@ class AddIssueScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
     AddIssueScreen .wiz-input:focus {
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     AddIssueScreen DataTable {
         height: 1fr;
@@ -559,9 +559,9 @@ class AddIssueScreen(Screen):
         width: 1fr;
         background: #002200;
         color: #00ff41;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
     }
-    AddIssueScreen .field-input:focus { border: tall #00ff41; }
+    AddIssueScreen .field-input:focus { border: solid #00ff41; }
     AddIssueScreen #wiz-buttons {
         height: 3;
         margin-top: 1;
@@ -570,14 +570,14 @@ class AddIssueScreen(Screen):
     AddIssueScreen Button {
         margin-right: 1;
         background: #002200;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         min-width: 16;
     }
     AddIssueScreen Button:focus,
     AddIssueScreen Button:hover {
         background: #004400;
-        border: tall #00ff41;
+        border: solid #00ff41;
     }
     AddIssueScreen #lgy-hint {
         color: #00aa22;
@@ -961,12 +961,12 @@ class LegacyReportApp(App):
         display: none;
         height: 3;
         background: #001a00;
-        border: tall #1a6e1a;
+        border: solid #1a6e1a;
         color: #00ff41;
         margin: 0;
         padding: 0 1;
     }
-    #search-input:focus { border: tall #00ff41; }
+    #search-input:focus { border: solid #00ff41; }
     DataTable { background: #0d0d0d; border: none; }
     DataTable > .datatable--header {
         background: #001a00;
