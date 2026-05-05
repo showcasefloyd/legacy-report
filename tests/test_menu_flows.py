@@ -706,6 +706,109 @@ class TestSearchCollectionSort:
 
         mock_table.assert_not_called()
 
+    def test_sort_issue_number_reorders_out_of_sequence(self, session):
+        """Issue numbers '10' and '2' sort numerically (2 < 10), not lexicographically."""
+        series, _ = get_or_create_series(
+            session,
+            title="X-Men",
+            start_year=1991,
+            publisher="Marvel Comics",
+        )
+        # Seed in reverse numeric order so pub_date order ≠ numeric order
+        issue_10 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="10",
+            legacy_number="10",
+            publication_date=date(1991, 3, 1),
+        )
+        issue_2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number="2",
+            publication_date=date(1991, 5, 1),
+        )
+        # Capture IDs before session state changes
+        issue_10_id = issue_10.id
+        issue_2_id = issue_2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "X-Men",  # search query
+                "",        # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 2
+        assert captured[0].id == issue_2_id   # "2" comes first numerically
+        assert captured[1].id == issue_10_id  # "10" comes after "2"
+
+    def test_sort_fractional_issue_number(self, session):
+        """Issue number '1/2' sorts numerically between 0 and 1."""
+        series, _ = get_or_create_series(
+            session,
+            title="Wolverine",
+            start_year=1982,
+            publisher="Marvel Comics",
+        )
+        issue_half = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1/2",
+            legacy_number=None,
+            publication_date=date(1982, 1, 1),
+        )
+        issue_1 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="1",
+            legacy_number=None,
+            publication_date=date(1982, 6, 1),
+        )
+        issue_2 = create_issue(
+            session,
+            series_id=series.id,
+            issue_number="2",
+            legacy_number=None,
+            publication_date=date(1982, 9, 1),
+        )
+        issue_half_id = issue_half.id
+        issue_1_id = issue_1.id
+        issue_2_id = issue_2.id
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Wolverine",  # search query
+                "",            # blank to exit
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("issue_num")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 3
+        assert captured[0].id == issue_half_id  # 0.5 < 1 < 2
+        assert captured[1].id == issue_1_id
+        assert captured[2].id == issue_2_id
+
 
 # ---------------------------------------------------------------------------
 # Tier 2: stats in header

@@ -42,11 +42,17 @@ def _get_session() -> Session:
 
 
 def _sort_key_num(num_str: str | None) -> tuple:
-    """Numeric-aware sort key for issue/legacy number strings."""
+    """Numeric-aware sort key for issue/legacy number strings.
+
+    Handles integers, decimals (1.5), and fractions (1/2). Non-numeric
+    strings (e.g. 'Infinity') sort after all numeric values, lexicographically.
+    """
+    from fractions import Fraction
+    s = (num_str or "").strip()
     try:
-        return (0, float(num_str or ""))
-    except (ValueError, TypeError):
-        return (1, str(num_str or ""))
+        return (0, float(Fraction(s)))
+    except (ValueError, ZeroDivisionError):
+        return (1, s)
 
 
 def _build_series_map(session: Session, issues: list) -> dict:
