@@ -652,9 +652,7 @@ def _main_menu_loop() -> None:
         console.print()
         _session = _get_session()
         _issue_count = _session.exec(select(func.count()).select_from(Issue)).one()
-        _series_count = _session.exec(
-            select(func.count(func.distinct(Issue.series_id))).select_from(Issue)
-        ).one()
+        _series_count = _session.exec(select(func.count()).select_from(Series)).one()
         _session.close()
         _stats = f"{_issue_count} issue{'s' if _issue_count != 1 else ''} across {_series_count} series"
         print_header(_stats)
