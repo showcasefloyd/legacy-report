@@ -24,7 +24,9 @@ def main(
     ),
 ) -> None:
     """Launch the Legacy Report interactive menu."""
-    from legacy_report.menu import main_menu
-
     init_db()
-    main_menu()
+    from legacy_report.tui import LegacyReportApp
+    LegacyReportApp().run()
+
+
+
