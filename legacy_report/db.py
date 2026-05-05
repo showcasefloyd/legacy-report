@@ -9,6 +9,9 @@ from legacy_report.config import get_config
 
 _engine = None
 
+# Sentinel used to distinguish "caller did not provide a value" from "caller explicitly passed None"
+_UNSET = object()
+
 
 def get_engine():
     global _engine
@@ -130,9 +133,13 @@ def update_issue(
     writer: Optional[str] = None,
     artist: Optional[str] = None,
     read: Optional[bool] = None,
-    rating: Optional[int] = None,
+    rating=_UNSET,
 ) -> object:
-    """Apply field updates to an existing Issue, commit, and return a refreshed instance."""
+    """Apply field updates to an existing Issue, commit, and return a refreshed instance.
+
+    Pass ``rating=None`` to explicitly clear a previously saved rating.
+    Omitting ``rating`` (or passing ``_UNSET``) leaves the current value unchanged.
+    """
     if issue_number is not None:
         issue.issue_number = issue_number
     if legacy_number is not None:
@@ -147,7 +154,7 @@ def update_issue(
         issue.artist = artist
     if read is not None:
         issue.read = read
-    if rating is not None:
+    if rating is not _UNSET:
         issue.rating = rating
     issue.updated_at = datetime.now(timezone.utc)
     session.add(issue)

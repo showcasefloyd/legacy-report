@@ -253,6 +253,20 @@ class TestReadRatingFields:
         fetched = session.get(Issue, issue.id)
         assert fetched.rating == 5
 
+    def test_clear_rating_with_none(self, session, series):
+        """Passing rating=None must clear a previously saved rating."""
+        issue = create_issue(session, series_id=series.id, issue_number="1", rating=4)
+        updated = update_issue(session, issue, rating=None)
+        assert updated.rating is None
+        fetched = session.get(Issue, issue.id)
+        assert fetched.rating is None
+
+    def test_omit_rating_leaves_value_unchanged(self, session, series):
+        """Omitting the rating argument must leave the existing rating unchanged."""
+        issue = create_issue(session, series_id=series.id, issue_number="1", rating=4)
+        updated = update_issue(session, issue, story_title="New Title")
+        assert updated.rating == 4
+
     def test_update_read_omitted_leaves_value_unchanged(self, session, series):
         issue = create_issue(session, series_id=series.id, issue_number="1", read=True)
         updated = update_issue(session, issue, story_title="New Title")
