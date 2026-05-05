@@ -445,6 +445,54 @@ class TestAddIssueDisplay:
         assert series is not None
         assert series.title == vols[0]["name"]
 
+    def test_add_issue_shows_detail_and_pauses_after_success(self, session):
+        """After a successful add, print_issue_detail is called and the 'Press Enter' pause fires."""
+        vols = self._FAKE_VOLUMES[:5]
+        fake_issue = {
+            "id": "999",
+            "issue_number": "42",
+            "name": "Spider-Man's New Foe",
+            "cover_date": "1965-07-01",
+            "description": "A great issue.",
+            "image": {},
+            "person_credits": [],
+        }
+        text_mock = _text_mock(
+            "Spider-Man",  # search query
+            "1",           # volume number selection
+            "1",           # CV issue number selection
+            "42",          # issue_number field
+            "",            # legacy_number
+            "1965-07-01",  # pub date
+            "",            # story_title
+            "",            # writer
+            "",            # artist
+            "",            # Press Enter to continue
+        )
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=[fake_issue]),
+            patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+            patch("legacy_report.menu.inquirer.text", text_mock) as mock_text,
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        # print_issue_detail must have been called once with the new issue and series
+        mock_detail.assert_called_once()
+        detail_issue, detail_series = mock_detail.call_args[0]
+        assert detail_issue.issue_number == "42"
+        assert detail_series.title == vols[0]["name"]
+
+        # The "Press Enter to continue" pause must have fired (10th inquirer.text call)
+        assert mock_text.call_count == 10
+
     def test_add_issue_invalid_number_returns_error(self, session):
         """Entering a number out of range shows an error; the loop continues so the user can retry."""
         vols = self._FAKE_VOLUMES[:5]
