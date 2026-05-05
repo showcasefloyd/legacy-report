@@ -8,6 +8,7 @@ Footer shows hotkeys. Enter opens an issue detail modal.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 from datetime import date, datetime
 from pathlib import Path
@@ -446,7 +447,7 @@ class ConfigScreen(Screen):
 
     async def _validate_and_save(self, key: str) -> None:
         from legacy_report import comicvine
-        valid = await self.app.run_in_thread(comicvine.validate_api_key, key)
+        valid = await asyncio.to_thread(comicvine.validate_api_key, key)
         if valid:
             set_api_key(key)
             masked = f"{key[:4]}{'*' * max(0, len(key) - 4)}" if len(key) > 4 else key
@@ -470,6 +471,37 @@ _WIZARD_STEP_VOLUMES  = "volumes"
 _WIZARD_STEP_ISSUES   = "issues"
 _WIZARD_STEP_CONFIRM  = "confirm"
 
+_WIZARD_STEPS = [
+    (_WIZARD_STEP_SEARCH,  "Search"),
+    (_WIZARD_STEP_VOLUMES, "Series"),
+    (_WIZARD_STEP_ISSUES,  "Issue"),
+    (_WIZARD_STEP_CONFIRM, "Confirm"),
+]
+
+_STEP_HELP = {
+    _WIZARD_STEP_SEARCH:  "  Type a title and press Enter ↵  ·  Esc exits",
+    _WIZARD_STEP_VOLUMES: "  ↑ ↓ navigate  ·  Enter ↵ to select a series  ·  Esc to go back",
+    _WIZARD_STEP_ISSUES:  "  ↑ ↓ navigate  ·  Enter ↵ to select an issue  ·  Esc to go back",
+    _WIZARD_STEP_CONFIRM: "  Edit any field  ·  Ctrl+S to save  ·  Esc to go back",
+}
+
+
+def _step_indicator_markup(current: str) -> str:
+    """Build a Rich-markup breadcrumb string for the wizard step indicator."""
+    order = [s[0] for s in _WIZARD_STEPS]
+    current_idx = order.index(current) if current in order else 0
+    sep = "[#1a4e1a] ─── [/]"
+    parts = []
+    for i, (key, label) in enumerate(_WIZARD_STEPS):
+        num = i + 1
+        if i == current_idx:
+            parts.append(f"[bold #00ff41]◉ {num} {label}[/]")
+        elif i < current_idx:
+            parts.append(f"[#00aa22]✓ {num} {label}[/]")
+        else:
+            parts.append(f"[#2a5e2a]○ {num} {label}[/]")
+    return "  " + sep.join(parts)
+
 
 class AddIssueScreen(Screen):
     """Multi-step wizard: search ComicVine → pick volume → pick issue → confirm."""
@@ -491,11 +523,17 @@ class AddIssueScreen(Screen):
         text-style: bold;
         height: 1;
     }
-    AddIssueScreen #wiz-step-label {
-        background: #002200;
-        color: #00aa22;
+    AddIssueScreen #wiz-step-indicator {
+        background: #001a00;
         height: 1;
         padding: 0 2;
+    }
+    AddIssueScreen #wiz-help {
+        background: #001a00;
+        color: #005500;
+        height: 1;
+        padding: 0 2;
+        border-top: solid #0a3e0a;
     }
     AddIssueScreen #wiz-body {
         padding: 1 2;
@@ -567,7 +605,8 @@ class AddIssueScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Label("  LEGACY REPORT — ADD ISSUE", id="wiz-header")
-        yield Label("  Step 1 of 4 — Search ComicVine", id="wiz-step-label")
+        yield Label(id="wiz-step-indicator", markup=True)
+        yield Label(id="wiz-help")
         with ScrollableContainer(id="wiz-body"):
             # Step 1: search input
             yield Input(
@@ -628,13 +667,8 @@ class AddIssueScreen(Screen):
 
     def _show_step(self, step: str) -> None:
         self._step = step
-        labels = {
-            _WIZARD_STEP_SEARCH:  "  Step 1 of 4 — Search ComicVine",
-            _WIZARD_STEP_VOLUMES: "  Step 2 of 4 — Select Series",
-            _WIZARD_STEP_ISSUES:  "  Step 3 of 4 — Select Issue",
-            _WIZARD_STEP_CONFIRM: "  Step 4 of 4 — Confirm & Save",
-        }
-        self.query_one("#wiz-step-label", Label).update(labels.get(step, ""))
+        self.query_one("#wiz-step-indicator", Label).update(_step_indicator_markup(step))
+        self.query_one("#wiz-help", Label).update(_STEP_HELP.get(step, ""))
 
         self.query_one("#wiz-search-input",  Input).display  = (step == _WIZARD_STEP_SEARCH)
         self.query_one("#wiz-volumes-table", DataTable).display = (step == _WIZARD_STEP_VOLUMES)
@@ -672,6 +706,7 @@ class AddIssueScreen(Screen):
                 self.run_worker(self._fetch_volumes(query), exclusive=True)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()  # prevent bubbling to LegacyReportApp._show_detail
         if self._step == _WIZARD_STEP_VOLUMES:
             idx = event.cursor_row
             if 0 <= idx < len(self._volumes):
@@ -698,7 +733,7 @@ class AddIssueScreen(Screen):
     async def _fetch_volumes(self, query: str) -> None:
         from legacy_report import comicvine
         try:
-            volumes = await self.app.run_in_thread(comicvine.search_volumes, query)
+            volumes = await asyncio.to_thread(comicvine.search_volumes, query)
             volumes = filter_volumes_by_tier(volumes)
         except Exception as e:
             self.notify(str(e), title="Search Failed", severity="error")
@@ -728,7 +763,7 @@ class AddIssueScreen(Screen):
     async def _fetch_issues(self, volume_id: str) -> None:
         from legacy_report import comicvine
         try:
-            issues = await self.app.run_in_thread(
+            issues = await asyncio.to_thread(
                 comicvine.get_issues_for_volume, volume_id
             )
         except Exception as e:
@@ -767,7 +802,7 @@ class AddIssueScreen(Screen):
         # Auto-calc LGY in background thread
         lgy = ""
         try:
-            lgy = await self.app.run_in_thread(
+            lgy = await asyncio.to_thread(
                 comicvine.calculate_lgy_number, vol, iss.get("issue_number", "")
             ) or ""
         except Exception:
@@ -855,12 +890,7 @@ class AddIssueScreen(Screen):
         self.dismiss(True)
 
     def action_go_back_or_cancel(self) -> None:
-        step_order = [
-            _WIZARD_STEP_SEARCH,
-            _WIZARD_STEP_VOLUMES,
-            _WIZARD_STEP_ISSUES,
-            _WIZARD_STEP_CONFIRM,
-        ]
+        step_order = [s[0] for s in _WIZARD_STEPS]
         idx = step_order.index(self._step) if self._step in step_order else 0
         if idx == 0:
             self.app.pop_screen()
