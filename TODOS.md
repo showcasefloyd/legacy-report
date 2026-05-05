@@ -19,6 +19,6 @@
 
 ## Tier 3 — Schema additions, medium effort
 
-- [ ] Read/Unread status — add `read: bool = False` to `Issue`; filterable, badged in table
-- [ ] Personal rating — add `rating: Optional[int]` (1–5) to `Issue`; render as stars in detail view
-- [ ] Export to CSV — walk all issues, write via `csv.writer`; no new dependencies
+- [x] Read/Unread status — add `read: bool = False` to `Issue`; filterable, badged in table
+- [x] Personal rating — add `rating: Optional[int]` (1–5) to `Issue`; render as stars in detail view
+- [x] Export to CSV — walk all issues, write via `csv.writer`; no new dependencies

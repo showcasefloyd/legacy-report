@@ -209,3 +209,59 @@ class TestDeleteIssue:
             delete_issue(session, issue)
         for issue in issues:
             assert session.get(Issue, issue.id) is None
+
+
+# ---------------------------------------------------------------------------
+# read / rating fields
+# ---------------------------------------------------------------------------
+
+class TestReadRatingFields:
+    def test_read_defaults_to_false(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1")
+        assert issue.read is False
+
+    def test_create_with_read_true(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1", read=True)
+        assert issue.read is True
+
+    def test_rating_defaults_to_none(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1")
+        assert issue.rating is None
+
+    def test_create_with_rating(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1", rating=4)
+        assert issue.rating == 4
+
+    def test_update_read_to_true(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1")
+        updated = update_issue(session, issue, read=True)
+        assert updated.read is True
+
+    def test_update_read_to_false(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1", read=True)
+        updated = update_issue(session, issue, read=False)
+        assert updated.read is False
+
+    def test_update_rating(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1")
+        updated = update_issue(session, issue, rating=3)
+        assert updated.rating == 3
+
+    def test_update_rating_persists_to_db(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1")
+        update_issue(session, issue, rating=5)
+        fetched = session.get(Issue, issue.id)
+        assert fetched.rating == 5
+
+    def test_update_read_omitted_leaves_value_unchanged(self, session, series):
+        issue = create_issue(session, series_id=series.id, issue_number="1", read=True)
+        updated = update_issue(session, issue, story_title="New Title")
+        assert updated.read is True
+
+    def test_update_read_false_is_applied_not_skipped(self, session, series):
+        """read=False must be treated as an explicit update, not skipped as falsy."""
+        issue = create_issue(session, series_id=series.id, issue_number="1", read=True)
+        updated = update_issue(session, issue, read=False)
+        fetched = session.get(Issue, issue.id)
+        assert fetched.read is False
+

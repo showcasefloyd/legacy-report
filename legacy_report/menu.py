@@ -97,12 +97,28 @@ def _prompt_issue_fields(defaults: dict) -> dict:
         default=defaults.get("artist") or "",
     ).execute()
 
+    rating_raw = inquirer.text(
+        message="Personal rating (1–5, blank for none):",
+        default=str(defaults.get("rating") or ""),
+    ).execute()
+
     pub_date: Optional[date] = None
     if pub_date_raw:
         try:
             pub_date = date.fromisoformat(pub_date_raw[:10])
         except ValueError:
             print_error(f"Invalid date '{pub_date_raw}' — leaving blank.")
+
+    rating: Optional[int] = None
+    if rating_raw.strip():
+        try:
+            r = int(rating_raw.strip())
+            if 1 <= r <= 5:
+                rating = r
+            else:
+                print_error("Rating must be 1–5 — leaving blank.")
+        except ValueError:
+            print_error(f"Invalid rating '{rating_raw}' — leaving blank.")
 
     return {
         "issue_number": issue_number or defaults.get("issue_number", ""),
@@ -111,6 +127,7 @@ def _prompt_issue_fields(defaults: dict) -> dict:
         "story_title": story_title or None,
         "writer": writer or None,
         "artist": artist or None,
+        "rating": rating,
     }
 
 
@@ -273,11 +290,13 @@ def search_collection() -> None:
         return
 
     sort_choice = inquirer.select(
-        message=f"Found {len(issues)} issue(s). Sort by:",
+        message=f"Found {len(issues)} issue(s). Sort / Filter:",
         choices=[
-            Choice(value="pub_date", name="Publication Date"),
-            Choice(value="issue_num", name="Issue #"),
-            Choice(value="lgy_num", name="LGY #"),
+            Choice(value="pub_date", name="Sort: Publication Date"),
+            Choice(value="issue_num", name="Sort: Issue #"),
+            Choice(value="lgy_num", name="Sort: LGY #"),
+            Choice(value="unread_only", name="Filter: Unread Only"),
+            Choice(value="read_only", name="Filter: Read Only"),
             Choice(value="cancel", name="Cancel"),
         ],
     ).execute()
@@ -286,7 +305,21 @@ def search_collection() -> None:
         session.close()
         return
 
-    if sort_choice == "issue_num":
+    if sort_choice == "unread_only":
+        issues = [i for i in issues if not i.read]
+        if not issues:
+            print_muted("No unread issues found.")
+            session.close()
+            return
+        issues.sort(key=lambda i: i.publication_date or date.min)
+    elif sort_choice == "read_only":
+        issues = [i for i in issues if i.read]
+        if not issues:
+            print_muted("No read issues found.")
+            session.close()
+            return
+        issues.sort(key=lambda i: i.publication_date or date.min)
+    elif sort_choice == "issue_num":
         issues.sort(key=lambda i: _sort_key_num(i.issue_number))
     elif sort_choice == "lgy_num":
         issues.sort(key=lambda i: _sort_key_num(i.legacy_number))
@@ -527,6 +560,7 @@ def edit_issue() -> None:
         "story_title": selected.story_title or "",
         "writer": selected.writer or "",
         "artist": selected.artist or "",
+        "rating": selected.rating,
     }
 
     fields = _prompt_issue_fields(defaults)
@@ -539,6 +573,7 @@ def edit_issue() -> None:
         story_title=fields["story_title"] or None,
         writer=fields["writer"] or None,
         artist=fields["artist"] or None,
+        rating=fields["rating"],
     )
     series = series_map.get(updated.series_id)
     print_success("Issue updated.")
@@ -605,6 +640,123 @@ def delete_issue() -> None:
     session.close()
 
 
+def mark_read_unread() -> None:
+    console.rule("[green]Mark as Read / Unread[/green]")
+    query = inquirer.text(message="Search your collection:").execute()
+    if not query.strip():
+        return
+
+    session = _get_session()
+    series_results = session.exec(
+        select(Series).where(Series.title.ilike(f"%{query}%"))
+    ).all()
+
+    if not series_results:
+        print_muted("No matching titles found.")
+        session.close()
+        return
+
+    series_ids = [s.id for s in series_results]
+    issues = session.exec(
+        select(Issue)
+        .where(Issue.series_id.in_(series_ids))
+        .order_by(Issue.publication_date)
+    ).all()
+
+    series_map = {s.id: s for s in series_results}
+
+    if not issues:
+        print_muted("No issues found.")
+        session.close()
+        return
+
+    selected_id = _paginated_issue_select(issues, series_map)
+
+    if selected_id is None:
+        session.close()
+        return
+
+    selected = session.get(Issue, selected_id)
+    if selected is None:
+        print_error("Issue no longer exists.")
+        session.close()
+        return
+
+    new_read = not selected.read
+    status_label = "read" if new_read else "unread"
+    series = series_map.get(selected.series_id)
+    label = (
+        f"{series.title} ({series.start_year}) #{selected.issue_number}"
+        if series
+        else f"Issue #{selected.issue_number}"
+    )
+    confirmed = inquirer.confirm(
+        message=f"Mark '{label}' as {status_label}?", default=True
+    ).execute()
+
+    if confirmed:
+        update_issue(session, selected, read=new_read)
+        print_success(f"Marked as {status_label}.")
+    else:
+        print_muted("Cancelled.")
+
+    session.close()
+
+
+def export_csv() -> None:
+    import csv
+    from pathlib import Path as _Path
+
+    console.rule("[green]Export to CSV[/green]")
+    default_path = str(_Path.home() / "legacy_report_export.csv")
+    path_raw = inquirer.text(
+        message="Export file path:",
+        default=default_path,
+    ).execute().strip()
+
+    if not path_raw:
+        return
+
+    out_path = _Path(path_raw).expanduser()
+
+    session = _get_session()
+    issues = list(session.exec(
+        select(Issue).order_by(Issue.series_id, Issue.publication_date)
+    ).all())
+    series_map = _build_series_map(session, issues)
+    session.close()
+
+    try:
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "Series", "Start Year", "Publisher",
+                "Issue #", "LGY #", "Pub Date",
+                "Story Title", "Writer", "Artist",
+                "Read", "Rating",
+            ])
+            for issue in issues:
+                s = series_map.get(issue.series_id)
+                writer.writerow([
+                    s.title if s else "",
+                    s.start_year if s else "",
+                    s.publisher if s else "",
+                    issue.issue_number,
+                    issue.legacy_number or "",
+                    str(issue.publication_date) if issue.publication_date else "",
+                    issue.story_title or "",
+                    issue.writer or "",
+                    issue.artist or "",
+                    "Yes" if issue.read else "No",
+                    issue.rating if issue.rating is not None else "",
+                ])
+    except OSError as e:
+        print_error(f"Could not write file: {e}")
+        return
+
+    print_success(f"Exported {len(issues)} issue(s) to {out_path}")
+
+
 def setup_config() -> None:
     console.rule("[green]Setup / Configuration[/green]")
     choice = inquirer.select(
@@ -665,7 +817,9 @@ def _main_menu_loop() -> None:
                 Choice(value="browse", name="Browse Collection"),
                 Choice(value="add", name="Add Issue"),
                 Choice(value="edit", name="Edit Issue"),
+                Choice(value="mark_read", name="Mark as Read / Unread"),
                 Choice(value="delete", name="Delete Issue"),
+                Choice(value="export_csv", name="Export to CSV"),
                 Choice(value="setup", name="Setup / Configuration"),
                 Choice(value="quit", name="Quit"),
             ],
@@ -679,8 +833,12 @@ def _main_menu_loop() -> None:
             add_issue()
         elif action == "edit":
             edit_issue()
+        elif action == "mark_read":
+            mark_read_unread()
         elif action == "delete":
             delete_issue()
+        elif action == "export_csv":
+            export_csv()
         elif action == "setup":
             setup_config()
         elif action == "quit":
