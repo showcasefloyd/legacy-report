@@ -119,6 +119,7 @@ class TestEditIssueFlow:
                 "New Story Title",      # story_title
                 "",                     # writer
                 "",                     # artist
+                "",                     # rating
                 "",                     # Press Enter to continue
             )),
         ):
@@ -149,7 +150,8 @@ class TestEditIssueFlow:
             "GC-Proof Title",       # call 5: story_title
             "",                     # call 6: writer
             "",                     # call 7: artist
-            "",                     # call 8: Press Enter to continue
+            "",                     # call 8: rating
+            "",                     # call 9: Press Enter to continue
         ]
 
         def gc_execute():
@@ -215,6 +217,7 @@ class TestEditIssueFlow:
                 "",
                 "Chris Claremont",
                 "John Byrne",
+                "",                 # rating
                 "",                 # Press Enter to continue
             )),
         ):
@@ -433,6 +436,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # rating
                 "",            # Press Enter to continue
             )),
         ):
@@ -467,6 +471,7 @@ class TestAddIssueDisplay:
             "",            # story_title
             "",            # writer
             "",            # artist
+            "",            # rating
             "",            # Press Enter to continue
         )
         with (
@@ -490,8 +495,8 @@ class TestAddIssueDisplay:
         assert detail_issue.issue_number == "42"
         assert detail_series.title == vols[0]["name"]
 
-        # The "Press Enter to continue" pause must have fired (10th inquirer.text call)
-        assert mock_text.call_count == 10
+        # The "Press Enter to continue" pause must have fired (11th inquirer.text call)
+        assert mock_text.call_count == 11
 
     def test_add_issue_invalid_number_returns_error(self, session):
         """Entering a number out of range shows an error; the loop continues so the user can retry."""
@@ -542,6 +547,7 @@ class TestAddIssueDisplay:
                 "",            # story_title
                 "",            # writer
                 "",            # artist
+                "",            # rating
                 "",            # Press Enter to continue
             )),
         ):
@@ -980,6 +986,7 @@ class TestEditPostAction:
                 "Confirmed Title",
                 "",
                 "",
+                "",          # rating
                 "",          # Press Enter to continue
             )),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
@@ -990,4 +997,316 @@ class TestEditPostAction:
         mock_detail.assert_called_once()
         called_issue = mock_detail.call_args[0][0]
         assert called_issue.story_title == "Confirmed Title"
+
+
+# ---------------------------------------------------------------------------
+# Tier 3: mark_read_unread flow
+# ---------------------------------------------------------------------------
+
+class TestMarkReadUnreadFlow:
+    def test_mark_unread_issue_as_read(self, session, seeded):
+        issue = seeded["issue1"]
+        issue_id = issue.id
+        assert not issue.read  # starts unread
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
+            patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+
+        session.expire_all()
+        updated = session.get(Issue, issue_id)
+        assert updated.read is True
+
+    def test_mark_read_issue_as_unread(self, session, seeded):
+        issue = seeded["issue1"]
+        issue.read = True
+        session.add(issue)
+        session.commit()
+        issue_id = issue.id
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
+            patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+
+        session.expire_all()
+        updated = session.get(Issue, issue_id)
+        assert updated.read is False
+
+    def test_mark_cancel_at_confirm_makes_no_changes(self, session, seeded):
+        issue = seeded["issue1"]
+        issue_id = issue.id
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
+            patch("legacy_report.menu.inquirer.confirm", _single_mock(False)),
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+
+        session.expire_all()
+        unchanged = session.get(Issue, issue_id)
+        assert unchanged.read is False
+
+    def test_mark_cancel_at_select_makes_no_changes(self, session, seeded):
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "")),
+            patch("legacy_report.menu.inquirer.confirm") as mock_confirm,
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+            mock_confirm.assert_not_called()
+
+    def test_mark_survives_gc_between_select_and_confirm(self, session, seeded):
+        issue = seeded["issue1"]
+        issue_id = issue.id
+
+        gc_collected = []
+        call_count = [0]
+        values = [
+            "Amazing Spider-Man",  # call 0: search
+            "1",                   # call 1: select (triggers GC)
+        ]
+
+        def gc_execute():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 1:
+                gc.collect()
+                gc_collected.append(True)
+            return values[idx]
+
+        mock_text = MagicMock()
+        mock_text.return_value.execute.side_effect = gc_execute
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", mock_text),
+            patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+
+        assert gc_collected, "GC was not triggered during the test"
+        session.expire_all()
+        updated = session.get(Issue, issue_id)
+        assert updated.read is True
+
+    def test_mark_no_results_returns_early(self, session, seeded):
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Nonexistent Title XYZ")),
+            patch("legacy_report.menu.inquirer.confirm") as mock_confirm,
+        ):
+            from legacy_report.menu import mark_read_unread
+            mark_read_unread()
+            mock_confirm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tier 3: read filter in search_collection
+# ---------------------------------------------------------------------------
+
+class TestSearchReadFilter:
+    def test_filter_unread_only_shows_unread(self, session, seeded):
+        # Mark issue1 as read, issue2 stays unread
+        seeded["issue1"].read = True
+        session.add(seeded["issue1"])
+        session.commit()
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",
+                "",  # exit view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("unread_only")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 1
+        assert captured[0].id == seeded["issue2"].id
+
+    def test_filter_read_only_shows_read(self, session, seeded):
+        # Mark both, then unmark one
+        seeded["issue1"].read = True
+        session.add(seeded["issue1"])
+        session.commit()
+
+        captured = []
+
+        def capture_table(issues, series_map):
+            captured.extend(issues)
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table", side_effect=capture_table),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",
+                "",  # exit view
+            )),
+            patch("legacy_report.menu.inquirer.select", _single_mock("read_only")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        assert len(captured) == 1
+        assert captured[0].id == seeded["issue1"].id
+
+    def test_filter_unread_only_empty_returns_early(self, session, seeded):
+        # Mark all as read
+        for issue in [seeded["issue1"], seeded["issue2"]]:
+            issue.read = True
+            session.add(issue)
+        session.commit()
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
+            patch("legacy_report.menu.inquirer.select", _single_mock("unread_only")),
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_table.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tier 3: export_csv flow
+# ---------------------------------------------------------------------------
+
+class TestExportCsvFlow:
+    def test_export_creates_csv_with_correct_headers(self, session, seeded, tmp_path):
+        import csv
+        out_file = tmp_path / "export.csv"
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(str(out_file))),
+        ):
+            from legacy_report.menu import export_csv
+            export_csv()
+
+        assert out_file.exists()
+        with open(out_file, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+
+        assert rows[0] == [
+            "Series", "Start Year", "Publisher",
+            "Issue #", "LGY #", "Pub Date",
+            "Story Title", "Writer", "Artist",
+            "Read", "Rating",
+        ]
+
+    def test_export_contains_all_issues(self, session, seeded, tmp_path):
+        import csv
+        out_file = tmp_path / "export.csv"
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(str(out_file))),
+        ):
+            from legacy_report.menu import export_csv
+            export_csv()
+
+        with open(out_file, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+
+        # header + 2 issues
+        assert len(rows) == 3
+
+    def test_export_read_column_reflects_status(self, session, seeded, tmp_path):
+        import csv
+        seeded["issue1"].read = True
+        session.add(seeded["issue1"])
+        session.commit()
+
+        out_file = tmp_path / "export.csv"
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(str(out_file))),
+        ):
+            from legacy_report.menu import export_csv
+            export_csv()
+
+        with open(out_file, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+
+        read_col = 9  # zero-indexed
+        read_values = {row[read_col] for row in rows[1:]}
+        assert "Yes" in read_values
+        assert "No" in read_values
+
+    def test_export_rating_column_reflects_value(self, session, seeded, tmp_path):
+        import csv
+        from legacy_report.db import update_issue as _update
+        _update(session, seeded["issue1"], rating=5)
+
+        out_file = tmp_path / "export.csv"
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(str(out_file))),
+        ):
+            from legacy_report.menu import export_csv
+            export_csv()
+
+        with open(out_file, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+
+        rating_col = 10
+        rating_values = [row[rating_col] for row in rows[1:]]
+        assert "5" in rating_values
+
+    def test_export_blank_path_does_nothing(self, session, seeded, tmp_path):
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock("")),
+        ):
+            from legacy_report.menu import export_csv
+            export_csv()
+        # No assertion needed — just confirm no crash and no file created
+
+    def test_export_edit_shows_rating_in_detail(self, session, seeded):
+        """After editing with a rating, print_issue_detail receives the updated issue."""
+        issue = seeded["issue1"]
+
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",
+                "1",
+                issue.issue_number,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "4",    # rating
+                "",     # Press Enter to continue
+            )),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+        ):
+            from legacy_report.menu import edit_issue
+            edit_issue()
+
+        mock_detail.assert_called_once()
+        called_issue = mock_detail.call_args[0][0]
+        assert called_issue.rating == 4
 

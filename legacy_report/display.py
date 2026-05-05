@@ -64,6 +64,7 @@ def print_issues_table(issues: list, series_map: dict) -> None:
     table.add_column("Pub Date", style="green", width=12)
     table.add_column("Story Title", style="bright_green", min_width=20)
     table.add_column("Publisher", style="dim green", width=12)
+    table.add_column("R", style="green", width=3)
 
     for idx, issue in enumerate(issues, 1):
         series = series_map.get(issue.series_id)
@@ -76,6 +77,7 @@ def print_issues_table(issues: list, series_map: dict) -> None:
             str(issue.publication_date) if issue.publication_date else "—",
             issue.story_title or "—",
             series.publisher if series else "—",
+            "✓" if issue.read else "",
         )
 
     console.print(table)
@@ -114,6 +116,8 @@ def print_series_table(series_list: list, counts: dict) -> None:
 def print_issue_detail(issue, series) -> None:
     """Print a single issue's full detail in a panel."""
     series_label = f"{series.title} ({series.start_year})" if series else "Unknown"
+    stars = ("★" * issue.rating + "☆" * (5 - issue.rating)) if issue.rating else "—"
+    read_label = "Yes" if issue.read else "No"
     lines = [
         f"[header]Series:[/header]      {series_label}",
         f"[header]Issue #:[/header]     {issue.issue_number}",
@@ -123,6 +127,8 @@ def print_issue_detail(issue, series) -> None:
         f"[header]Publisher:[/header]   {series.publisher if series else '—'}",
         f"[header]Writer:[/header]      {issue.writer or '—'}",
         f"[header]Artist:[/header]      {issue.artist or '—'}",
+        f"[header]Read:[/header]        {read_label}",
+        f"[header]Rating:[/header]      {stars}",
     ]
     if issue.description:
         lines.append(f"\n[muted]{issue.description[:300]}...[/muted]")

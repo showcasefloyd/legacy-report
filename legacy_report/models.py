@@ -33,6 +33,8 @@ class Issue(SQLModel, table=True):
     writer: Optional[str] = None
     artist: Optional[str] = None
     comicvine_id: Optional[str] = None
+    read: bool = Field(default=False)
+    rating: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

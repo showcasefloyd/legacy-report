@@ -2,11 +2,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Generator, Optional
 
+from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from legacy_report.config import get_config
 
 _engine = None
+
+# Sentinel used to distinguish "caller did not provide a value" from "caller explicitly passed None"
+_UNSET = object()
 
 
 def get_engine():
@@ -23,7 +27,20 @@ def init_db() -> None:
     # Import models so SQLModel metadata is populated before create_all
     from legacy_report import models  # noqa: F401
 
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    # Migrate existing databases that predate these columns
+    _migrations = [
+        "ALTER TABLE issue ADD COLUMN read BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE issue ADD COLUMN rating INTEGER",
+    ]
+    with engine.connect() as conn:
+        for stmt in _migrations:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -79,6 +96,8 @@ def create_issue(
     description: Optional[str] = None,
     cover_image_url: Optional[str] = None,
     comicvine_id: Optional[str] = None,
+    read: bool = False,
+    rating: Optional[int] = None,
 ) -> object:
     """Insert a new Issue row and return a refreshed, session-tracked instance."""
     from legacy_report.models import Issue
@@ -94,6 +113,8 @@ def create_issue(
         description=description,
         cover_image_url=cover_image_url,
         comicvine_id=comicvine_id,
+        read=read,
+        rating=rating,
     )
     session.add(issue)
     session.commit()
@@ -111,8 +132,14 @@ def update_issue(
     story_title: Optional[str] = None,
     writer: Optional[str] = None,
     artist: Optional[str] = None,
+    read: Optional[bool] = None,
+    rating=_UNSET,
 ) -> object:
-    """Apply field updates to an existing Issue, commit, and return a refreshed instance."""
+    """Apply field updates to an existing Issue, commit, and return a refreshed instance.
+
+    Pass ``rating=None`` to explicitly clear a previously saved rating.
+    Omitting ``rating`` (or passing ``_UNSET``) leaves the current value unchanged.
+    """
     if issue_number is not None:
         issue.issue_number = issue_number
     if legacy_number is not None:
@@ -125,6 +152,10 @@ def update_issue(
         issue.writer = writer
     if artist is not None:
         issue.artist = artist
+    if read is not None:
+        issue.read = read
+    if rating is not _UNSET:
+        issue.rating = rating
     issue.updated_at = datetime.now(timezone.utc)
     session.add(issue)
     session.commit()
