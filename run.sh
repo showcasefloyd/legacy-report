@@ -11,9 +11,7 @@ if [[ ! -d "$VENV" ]]; then
     python3 -m venv "$VENV"
 fi
 
-if [[ ! -f "$VENV/bin/legacy-report" ]]; then
-    echo "Installing dependencies..."
-    "$VENV/bin/pip" install -e . --quiet
-fi
+echo "Installing dependencies..."
+"$VENV/bin/pip" install -e . --quiet
 
 exec "$VENV/bin/legacy-report" "$@"
