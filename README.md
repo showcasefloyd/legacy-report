@@ -1,6 +1,8 @@
 # Legacy Report
 
-A terminal-based TUI for managing your comic book collection using **Legacy (LGY) numbering** — the canonical, continuous issue numbers that span a title's reboots and relaunches.
+A full-screen terminal TUI for managing your comic book collection using **Legacy (LGY) numbering** — the canonical, continuous issue numbers that span a title's reboots and relaunches.
+
+Built with [Textual](https://textual.textualize.io/) for a retro CRT-green aesthetic. Navigate series and issues entirely from the keyboard, search in real time, and pull rich metadata from the [ComicVine API](https://comicvine.gamespot.com/api/).
 
 ## Requirements
 
