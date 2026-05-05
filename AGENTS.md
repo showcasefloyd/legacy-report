@@ -136,9 +136,9 @@ This project uses **pytest**.
 
 **Two test layers are required for this project:**
 
-| Layer | File | What to test |
-|-------|------|--------------|
-| Data layer | `tests/test_collection.py` | CRUD functions in `db.py` — use an in-memory SQLite session, no mocks |
+| Layer      | File                       | What to test                                                                                    |
+| ---------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| Data layer | `tests/test_collection.py` | CRUD functions in `db.py` — use an in-memory SQLite session, no mocks                           |
 | Menu layer | `tests/test_menu_flows.py` | Full menu flows with mocked InquirerPy prompts + `gc.collect()` between select and mutate steps |
 
 The menu layer tests exist specifically to catch `ObjectDereferencedError` and session lifecycle bugs that the data layer tests cannot see — InquirerPy runs an asyncio event loop between prompts, which gives CPython's GC a chance to collect SQLAlchemy weak references. Always include a GC pressure test when adding a new menu flow that mutates data.

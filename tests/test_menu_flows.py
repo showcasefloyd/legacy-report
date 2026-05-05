@@ -112,14 +112,14 @@ class TestEditIssueFlow:
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
                 "Amazing Spider-Man",   # search query
-                issue.issue_number,      # issue_number field
-                "",                      # legacy_number
-                "",                      # pub date
-                "New Story Title",       # story_title
-                "",                      # writer
-                "",                      # artist
+                "1",                    # issue select (issue1 is first by date)
+                issue.issue_number,     # issue_number field
+                "",                     # legacy_number
+                "",                     # pub date
+                "New Story Title",      # story_title
+                "",                     # writer
+                "",                     # artist
             )),
-            patch("legacy_report.menu.inquirer.select", _single_mock(issue_id)),
         ):
             from legacy_report.menu import edit_issue
             edit_issue()
@@ -130,7 +130,7 @@ class TestEditIssueFlow:
 
     def test_edit_survives_gc_between_select_and_mutate(self, session, seeded):
         """
-        Force gc.collect() after the select prompt and before _prompt_issue_fields.
+        Force gc.collect() during the number-select prompt, before session.get().
         This replicates the GC pressure from InquirerPy's asyncio event loop.
         Without the ID-based re-fetch fix, this raises ObjectDereferencedError.
         """
@@ -138,28 +138,32 @@ class TestEditIssueFlow:
         issue_id = issue.id
 
         gc_collected = []
+        call_count = [0]
+        values = [
+            "Amazing Spider-Man",   # call 0: search query
+            "1",                    # call 1: issue number select (triggers GC)
+            issue.issue_number,     # call 2: issue_number field
+            "",                     # call 3: legacy_number
+            "",                     # call 4: pub date
+            "GC-Proof Title",       # call 5: story_title
+            "",                     # call 6: writer
+            "",                     # call 7: artist
+        ]
 
-        mock_select = MagicMock()
+        def gc_execute():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 1:  # the number-select prompt
+                gc.collect()
+                gc_collected.append(True)
+            return values[idx]
 
-        def execute_select():
-            gc.collect()
-            gc_collected.append(True)
-            return issue_id
-
-        mock_select.return_value.execute.side_effect = execute_select
+        mock_text = MagicMock()
+        mock_text.return_value.execute.side_effect = gc_execute
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock(
-                "Amazing Spider-Man",
-                issue.issue_number,
-                "",
-                "",
-                "GC-Proof Title",
-                "",
-                "",
-            )),
-            patch("legacy_report.menu.inquirer.select", mock_select),
+            patch("legacy_report.menu.inquirer.text", mock_text),
         ):
             from legacy_report.menu import edit_issue
             edit_issue()  # must not raise ObjectDereferencedError
@@ -175,8 +179,7 @@ class TestEditIssueFlow:
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", _single_mock(None)),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "")),
         ):
             from legacy_report.menu import edit_issue
             edit_issue()
@@ -189,11 +192,11 @@ class TestEditIssueFlow:
         with (
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock("Nonexistent Title XYZ")),
-            patch("legacy_report.menu.inquirer.select") as mock_select,
+            patch("legacy_report.menu.print_issues_table") as mock_table,
         ):
             from legacy_report.menu import edit_issue
             edit_issue()
-            mock_select.assert_not_called()
+            mock_table.assert_not_called()
 
     def test_edit_updates_writer_and_artist(self, session, seeded):
         issue = seeded["issue2"]
@@ -203,6 +206,7 @@ class TestEditIssueFlow:
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
                 "Amazing Spider-Man",
+                "2",                # issue2 is second by date
                 issue.issue_number,
                 "",
                 "",
@@ -210,7 +214,6 @@ class TestEditIssueFlow:
                 "Chris Claremont",
                 "John Byrne",
             )),
-            patch("legacy_report.menu.inquirer.select", _single_mock(issue_id)),
         ):
             from legacy_report.menu import edit_issue
             edit_issue()
@@ -232,8 +235,7 @@ class TestDeleteIssueFlow:
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", _single_mock(issue_id)),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
             patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
         ):
             from legacy_report.menu import delete_issue
@@ -243,27 +245,33 @@ class TestDeleteIssueFlow:
 
     def test_delete_survives_gc_between_select_and_confirm(self, session, seeded):
         """
-        Force gc.collect() after select, before confirm — replicates GC pressure
-        from InquirerPy's event loop on the confirm prompt.
+        Force gc.collect() during the number-select prompt, before confirm.
+        Replicates GC pressure from InquirerPy's event loop on the confirm prompt.
         """
         issue = seeded["issue1"]
         issue_id = issue.id
 
         gc_collected = []
+        call_count = [0]
+        values = [
+            "Amazing Spider-Man",  # call 0: search query
+            "1",                   # call 1: issue number select (triggers GC)
+        ]
 
-        mock_select = MagicMock()
+        def gc_execute():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 1:  # the number-select prompt
+                gc.collect()
+                gc_collected.append(True)
+            return values[idx]
 
-        def execute_select():
-            gc.collect()
-            gc_collected.append(True)
-            return issue_id
-
-        mock_select.return_value.execute.side_effect = execute_select
+        mock_text = MagicMock()
+        mock_text.return_value.execute.side_effect = gc_execute
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", mock_select),
+            patch("legacy_report.menu.inquirer.text", mock_text),
             patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
         ):
             from legacy_report.menu import delete_issue
@@ -278,8 +286,7 @@ class TestDeleteIssueFlow:
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", _single_mock(issue_id)),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
             patch("legacy_report.menu.inquirer.confirm", _single_mock(False)),
         ):
             from legacy_report.menu import delete_issue
@@ -290,8 +297,7 @@ class TestDeleteIssueFlow:
     def test_delete_cancel_at_select_makes_no_changes(self, session, seeded):
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", _single_mock(None)),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "")),
             patch("legacy_report.menu.inquirer.confirm") as mock_confirm,
         ):
             from legacy_report.menu import delete_issue
@@ -307,8 +313,7 @@ class TestDeleteIssueFlow:
 
         with (
             patch("legacy_report.menu._get_session", return_value=session),
-            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man")),
-            patch("legacy_report.menu.inquirer.select", _single_mock(issue1_id)),
+            patch("legacy_report.menu.inquirer.text", _text_mock("Amazing Spider-Man", "1")),
             patch("legacy_report.menu.inquirer.confirm", _single_mock(True)),
         ):
             from legacy_report.menu import delete_issue
@@ -323,53 +328,80 @@ class TestDeleteIssueFlow:
 # ---------------------------------------------------------------------------
 
 class TestAddIssueDisplay:
-    """Guard against the table+list double-render regression.
+    """Guard against the table+list double-render regression, and verify pagination.
 
-    Volumes must be displayed as a Rich table (print_volumes_table) and selected
-    by number prompt — NOT via an InquirerPy select list, which would render the
-    same items a second time directly below the table.
+    Volumes are displayed as a paginated Rich table and selected by number prompt.
+    inquirer.select must never be used for volume selection.
     """
 
-    # Minimal fake volumes returned by the ComicVine API
     _FAKE_VOLUMES = [
         {
-            "id": "1234",
-            "name": "Amazing Spider-Man",
-            "start_year": 1963,
+            "id": str(i),
+            "name": f"Amazing Spider-Man Vol {i}",
+            "start_year": 1960 + i,
             "publisher": {"name": "Marvel Comics"},
-            "count_of_issues": 700,
+            "count_of_issues": 10 * i,
             "description": "",
-        },
-        {
-            "id": "5678",
-            "name": "Amazing Spider-Man Vol 2",
-            "start_year": 1999,
-            "publisher": {"name": "Marvel Comics"},
-            "count_of_issues": 58,
-            "description": "",
-        },
+        }
+        for i in range(1, 62)  # 61 volumes — enough for two pages at PAGE_SIZE=50
     ]
 
     def test_add_issue_shows_table_not_select_list(self, session):
-        """Table must be printed; inquirer.select must NOT be called for volume selection."""
+        """Volume table must be printed; inquirer.select must NOT be called anywhere."""
         with (
             patch("legacy_report.menu.get_api_key", return_value="fake-key"),
             patch("legacy_report.menu.comicvine.search_volumes",
-                  return_value=self._FAKE_VOLUMES),
+                  return_value=self._FAKE_VOLUMES[:5]),
             patch("legacy_report.menu.filter_volumes_by_tier",
-                  return_value=self._FAKE_VOLUMES),
+                  return_value=self._FAKE_VOLUMES[:5]),
             patch("legacy_report.menu.print_volumes_table") as mock_table,
-            patch("legacy_report.menu.inquirer.text", _text_mock("Spider-Man", "")),  # query, then blank to cancel
+            patch("legacy_report.menu.inquirer.text", _text_mock("Spider-Man", "")),
             patch("legacy_report.menu.inquirer.select") as mock_select,
         ):
             from legacy_report.menu import add_issue
             add_issue()
 
-        mock_table.assert_called_once_with(self._FAKE_VOLUMES)
+        mock_table.assert_called()
+        mock_select.assert_not_called()
+
+    def test_add_issue_shows_cv_issues_table_not_select_list(self, session):
+        """CV issues must use Rich table + number prompt, never inquirer.select."""
+        vols = self._FAKE_VOLUMES[:2]
+        fake_cv_issues = [
+            {
+                "id": "1",
+                "issue_number": "1",
+                "name": "First Issue",
+                "cover_date": "1963-03-01",
+                "description": "",
+                "image": {},
+                "person_credits": [],
+            }
+        ]
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=fake_cv_issues),
+            patch("legacy_report.menu.print_cv_issues_table") as mock_cv_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Spider-Man",  # search query
+                "1",           # volume select
+                "",            # cancel at CV issue select
+            )),
+            patch("legacy_report.menu.inquirer.select") as mock_select,
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        mock_cv_table.assert_called()
         mock_select.assert_not_called()
 
     def test_add_issue_number_selection_picks_correct_volume(self, session):
-        """Entering '1' at the number prompt selects the first volume."""
+        """Entering '1' at the number prompt selects the first volume on the page."""
+        vols = self._FAKE_VOLUMES[:5]
         fake_issue = {
             "id": "999",
             "issue_number": "1",
@@ -381,10 +413,8 @@ class TestAddIssueDisplay:
         }
         with (
             patch("legacy_report.menu.get_api_key", return_value="fake-key"),
-            patch("legacy_report.menu.comicvine.search_volumes",
-                  return_value=self._FAKE_VOLUMES),
-            patch("legacy_report.menu.filter_volumes_by_tier",
-                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
                   return_value=[fake_issue]),
@@ -392,7 +422,8 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
                 "Spider-Man",  # search query
-                "1",           # volume number selection
+                "1",           # volume number selection (page 1, item 1)
+                "1",           # CV issue number selection
                 "1",           # issue_number field
                 "",            # legacy_number
                 "1963-03-01",  # pub date
@@ -400,8 +431,6 @@ class TestAddIssueDisplay:
                 "",            # writer
                 "",            # artist
             )),
-            patch("legacy_report.menu.inquirer.select",
-                  _single_mock(fake_issue)),  # issue select (still uses select)
         ):
             from legacy_report.menu import add_issue
             add_issue()
@@ -410,22 +439,197 @@ class TestAddIssueDisplay:
         from sqlmodel import select as sql_select
         series = session.exec(sql_select(Series)).first()
         assert series is not None
-        assert series.title == "Amazing Spider-Man"
+        assert series.title == vols[0]["name"]
 
     def test_add_issue_invalid_number_returns_error(self, session):
-        """Entering a number out of range shows an error and does not proceed."""
+        """Entering a number out of range shows an error; the loop continues so the user can retry."""
+        vols = self._FAKE_VOLUMES[:5]
         with (
             patch("legacy_report.menu.get_api_key", return_value="fake-key"),
-            patch("legacy_report.menu.comicvine.search_volumes",
-                  return_value=self._FAKE_VOLUMES),
-            patch("legacy_report.menu.filter_volumes_by_tier",
-                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume") as mock_issues,
             patch("legacy_report.menu.inquirer.text",
-                  _text_mock("Spider-Man", "99")),  # 99 is out of range
+                  _text_mock("Spider-Man", "99", "")),  # bad input, then blank to cancel
         ):
             from legacy_report.menu import add_issue
             add_issue()
 
         mock_issues.assert_not_called()
+
+    def test_add_issue_pagination_next_and_select(self, session):
+        """Entering 'n' advances to the next page; selecting '1' picks the first item there."""
+        vols = self._FAKE_VOLUMES  # 61 volumes — 2 pages
+        fake_issue = {
+            "id": "999",
+            "issue_number": "1",
+            "name": "Issue on Page 2",
+            "cover_date": "1963-03-01",
+            "description": "",
+            "image": {},
+            "person_credits": [],
+        }
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table") as mock_table,
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=[fake_issue]),
+            patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Spider-Man",  # search query
+                "n",           # next page
+                "1",           # select item 1 on page 2
+                "1",           # CV issue number selection
+                "1",           # issue_number field
+                "",            # legacy_number
+                "1963-03-01",  # pub date
+                "",            # story_title
+                "",            # writer
+                "",            # artist
+            )),
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        # Table should have been rendered twice (page 1, then page 2)
+        assert mock_table.call_count == 2
+        # The volume selected was from page 2 (index 50, i.e. vols[50])
+        from legacy_report.models import Series
+        from sqlmodel import select as sql_select
+        series = session.exec(sql_select(Series)).first()
+        assert series is not None
+        assert series.title == vols[50]["name"]
+
+    def test_add_issue_pagination_prev_navigates_back(self, session):
+        """Entering 'p' on page 2 goes back to page 1."""
+        vols = self._FAKE_VOLUMES  # 61 volumes — 2 pages
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table") as mock_table,
+            patch("legacy_report.menu.comicvine.get_issues_for_volume") as mock_issues,
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Spider-Man",  # search query
+                "n",           # go to page 2
+                "p",           # go back to page 1
+                "",            # cancel
+            )),
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        # Table rendered 3 times: page 1, page 2, page 1 again
+        assert mock_table.call_count == 3
+        mock_issues.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# issue view display (search_collection)
+# ---------------------------------------------------------------------------
+
+class TestIssueViewDisplay:
+    """Guard that _paginated_issue_view uses Rich table + number prompt, not inquirer.select."""
+
+    def test_issue_view_shows_table_not_select_list(self, session, seeded):
+        """Issue list must use Rich table + number prompt; inquirer.select must never be called."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit issue view
+            )),
+            patch("legacy_report.menu.inquirer.select") as mock_select,
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_table.assert_called()
+        mock_select.assert_not_called()
+
+    def test_issue_view_blank_cancels_loop(self, session, seeded):
+        """Blank input at the number prompt exits without showing any detail panel."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "",                    # blank to exit
+            )),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_detail.assert_not_called()
+
+    def test_issue_view_number_shows_detail(self, session, seeded):
+        """Entering '1' shows the detail panel for the first issue, then loops back."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Amazing Spider-Man",  # search query
+                "1",                   # view detail for issue 1
+                "",                    # "Press Enter to go back" prompt
+                "",                    # blank to exit issue view loop
+            )),
+            patch("legacy_report.menu.print_issue_detail") as mock_detail,
+        ):
+            from legacy_report.menu import search_collection
+            search_collection()
+
+        mock_detail.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# browse_collection display
+# ---------------------------------------------------------------------------
+
+class TestBrowseCollectionDisplay:
+    """Guard that browse_collection uses Rich table + number prompt for series, not inquirer.select."""
+
+    def test_browse_shows_series_table_not_select_list(self, session, seeded):
+        """Series list must use Rich table + number prompt; inquirer.select must never be called."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_series_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("")),
+            patch("legacy_report.menu.inquirer.select") as mock_select,
+        ):
+            from legacy_report.menu import browse_collection
+            browse_collection()
+
+        mock_table.assert_called()
+        mock_select.assert_not_called()
+
+    def test_browse_number_selection_opens_issue_view(self, session, seeded):
+        """Entering '1' opens the issue view (shows issues table) for the first series."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_issues_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "1",  # select first series
+                "",   # blank to exit issue view
+            )),
+        ):
+            from legacy_report.menu import browse_collection
+            browse_collection()
+
+        mock_issues_table.assert_called()
+
+    def test_browse_blank_cancels_without_opening_issues(self, session, seeded):
+        """Blank input at the series prompt exits without showing any issues."""
+        with (
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_issues_table") as mock_issues_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("")),
+        ):
+            from legacy_report.menu import browse_collection
+            browse_collection()
+
+        mock_issues_table.assert_not_called()
+

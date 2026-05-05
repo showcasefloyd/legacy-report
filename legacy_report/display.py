@@ -129,6 +129,34 @@ def print_issue_detail(issue, series) -> None:
     console.print(Panel(content, title="[bold green]Issue Detail[/bold green]", border_style="green"))
 
 
+def print_cv_issues_table(issues: list) -> None:
+    """Display ComicVine issue search results."""
+    if not issues:
+        console.print("[muted]No issues found.[/muted]")
+        return
+
+    table = Table(
+        show_header=True,
+        header_style="bold green",
+        border_style="green",
+        style="green",
+    )
+    table.add_column("#", style="dim green", width=4)
+    table.add_column("Issue #", style="bold green", width=8)
+    table.add_column("Story Title", style="bright_green", min_width=25)
+    table.add_column("Cover Date", style="yellow", width=12)
+
+    for idx, iss in enumerate(issues, 1):
+        table.add_row(
+            str(idx),
+            iss.get("issue_number", "—"),
+            iss.get("name") or "—",
+            iss.get("cover_date", "—"),
+        )
+
+    console.print(table)
+
+
 def print_volumes_table(volumes: list) -> None:
     """Display ComicVine volume search results."""
     table = Table(

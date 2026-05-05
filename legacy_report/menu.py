@@ -15,6 +15,7 @@ from legacy_report.db import delete_issue as _db_delete_issue
 from legacy_report.publishers import filter_volumes_by_tier
 from legacy_report.display import (
     console,
+    print_cv_issues_table,
     print_error,
     print_header,
     print_info,
@@ -99,6 +100,88 @@ def _prompt_issue_fields(defaults: dict) -> dict:
     }
 
 
+def _paginated_volume_select(volumes: list):
+    """Display volumes in pages and return the selected volume dict, or None to cancel."""
+    total = len(volumes)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = 0
+
+    while True:
+        start = page * PAGE_SIZE
+        page_vols = volumes[start : start + PAGE_SIZE]
+
+        console.clear()
+        if total_pages > 1:
+            print_muted(f"Page {page + 1} of {total_pages}  ({total} results total)")
+        print_volumes_table(page_vols)
+
+        nav_hints = []
+        if page > 0:
+            nav_hints.append("[p]rev")
+        if page < total_pages - 1:
+            nav_hints.append("[n]ext")
+        nav_hints.append("blank to cancel")
+        prompt = f"Enter number (1–{len(page_vols)}){', ' + ', '.join(nav_hints) if nav_hints else ''}:"
+
+        raw = inquirer.text(message=prompt).execute().strip()
+
+        if not raw:
+            return None
+        if raw.lower() == "n" and page < total_pages - 1:
+            page += 1
+        elif raw.lower() == "p" and page > 0:
+            page -= 1
+        else:
+            try:
+                idx = int(raw) - 1
+                if idx < 0 or idx >= len(page_vols):
+                    raise ValueError
+                return page_vols[idx]
+            except ValueError:
+                print_error(f"Invalid input '{raw}'. Enter a number between 1 and {len(page_vols)}.")
+
+
+def _paginated_issue_select(issues: list, series_map: dict) -> Optional[int]:
+    """Display issues in pages and return the selected issue's ID, or None to cancel."""
+    total = len(issues)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = 0
+
+    while True:
+        start = page * PAGE_SIZE
+        page_issues = issues[start : start + PAGE_SIZE]
+
+        console.clear()
+        if total_pages > 1:
+            print_muted(f"Page {page + 1} of {total_pages}  ({total} issues total)")
+        print_issues_table(page_issues, series_map)
+
+        nav_hints = []
+        if page > 0:
+            nav_hints.append("[p]rev")
+        if page < total_pages - 1:
+            nav_hints.append("[n]ext")
+        nav_hints.append("blank to cancel")
+        prompt = f"Enter number (1–{len(page_issues)}){', ' + ', '.join(nav_hints) if nav_hints else ''}:"
+
+        raw = inquirer.text(message=prompt).execute().strip()
+
+        if not raw:
+            return None
+        if raw.lower() == "n" and page < total_pages - 1:
+            page += 1
+        elif raw.lower() == "p" and page > 0:
+            page -= 1
+        else:
+            try:
+                idx = int(raw) - 1
+                if idx < 0 or idx >= len(page_issues):
+                    raise ValueError
+                return page_issues[idx].id
+            except ValueError:
+                print_error(f"Invalid input '{raw}'. Enter a number between 1 and {len(page_issues)}.")
+
+
 def _paginated_issue_view(issues: list, series_map: dict) -> None:
     """Display issues in pages with optional detail drill-down."""
     total = len(issues)
@@ -109,34 +192,38 @@ def _paginated_issue_view(issues: list, series_map: dict) -> None:
         start = page * PAGE_SIZE
         page_issues = issues[start : start + PAGE_SIZE]
 
+        console.clear()
         if total_pages > 1:
             print_muted(f"Page {page + 1} of {total_pages}  ({total} issues total)")
         print_issues_table(page_issues, series_map)
 
-        choices = [
-            Choice(
-                value=issue,
-                name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
-                     f"#{issue.issue_number} — {issue.publication_date or 'no date'}",
-            )
-            for issue in page_issues
-        ]
+        nav_hints = []
         if page > 0:
-            choices.insert(0, Choice(value="__prev__", name="← Previous page"))
+            nav_hints.append("[p]rev")
         if page < total_pages - 1:
-            choices.append(Choice(value="__next__", name="Next page →"))
-        choices.append(Choice(value=None, name="Back"))
+            nav_hints.append("[n]ext")
+        nav_hints.append("blank to go back")
+        prompt = f"Enter number to view detail (1–{len(page_issues)}){', ' + ', '.join(nav_hints) if nav_hints else ''}:"
 
-        selected = inquirer.select(message="Select issue for detail:", choices=choices).execute()
+        raw = inquirer.text(message=prompt).execute().strip()
 
-        if selected is None:
+        if not raw:
             break
-        elif selected == "__prev__":
-            page -= 1
-        elif selected == "__next__":
+        if raw.lower() == "n" and page < total_pages - 1:
             page += 1
+        elif raw.lower() == "p" and page > 0:
+            page -= 1
         else:
-            print_issue_detail(selected, series_map.get(selected.series_id))
+            try:
+                idx = int(raw) - 1
+                if idx < 0 or idx >= len(page_issues):
+                    raise ValueError
+                issue = page_issues[idx]
+                console.clear()
+                print_issue_detail(issue, series_map.get(issue.series_id))
+                inquirer.text(message="Press Enter to go back").execute()
+            except ValueError:
+                print_error(f"Invalid input '{raw}'. Enter a number between 1 and {len(page_issues)}.")
 
 
 # ---------------------------------------------------------------------------
@@ -194,17 +281,21 @@ def browse_collection() -> None:
 
     print_series_table(series_list, counts)
 
-    choices = [
-        Choice(
-            value=s,
-            name=f"{s.title} ({s.start_year}) — {counts.get(s.id, 0)} issues",
-        )
-        for s in series_list
-    ]
-    choices.append(Choice(value=None, name="Back"))
-    selected_series = inquirer.select(message="Select series to view issues:", choices=choices).execute()
+    raw = inquirer.text(
+        message=f"Enter number to view series (1–{len(series_list)}), or blank to go back:"
+    ).execute().strip()
 
-    if selected_series is None:
+    if not raw:
+        session.close()
+        return
+
+    try:
+        idx = int(raw) - 1
+        if idx < 0 or idx >= len(series_list):
+            raise ValueError
+        selected_series = series_list[idx]
+    except ValueError:
+        print_error(f"Invalid input '{raw}'.")
         session.close()
         return
 
@@ -237,17 +328,8 @@ def add_issue() -> None:
         print_muted("No results found on ComicVine for US/UK/EU publishers.")
         return
 
-    print_volumes_table(volumes)
-    raw = inquirer.text(message=f"Enter number (1–{len(volumes)}) or blank to cancel:").execute()
-    if not raw.strip():
-        return
-    try:
-        idx = int(raw.strip()) - 1
-        if idx < 0 or idx >= len(volumes):
-            raise ValueError
-        selected_vol = volumes[idx]
-    except ValueError:
-        print_error(f"Invalid selection '{raw.strip()}'. Enter a number between 1 and {len(volumes)}.")
+    selected_vol = _paginated_volume_select(volumes)
+    if selected_vol is None:
         return
 
     print_info(f"Fetching issues for {selected_vol['name']}...")
@@ -261,18 +343,45 @@ def add_issue() -> None:
         print_muted("No issues found for this series on ComicVine.")
         return
 
-    issue_choices = [
-        Choice(
-            value=iss,
-            name=f"#{iss.get('issue_number', '?')} — {iss.get('name') or 'untitled'} ({iss.get('cover_date', '?')})",
-        )
-        for iss in cv_issues
-    ]
-    issue_choices.append(Choice(value=None, name="Cancel"))
-    selected_iss = inquirer.select(message="Select issue:", choices=issue_choices).execute()
+    cv_page = 0
+    selected_iss = None
+    cv_total = len(cv_issues)
+    cv_total_pages = max(1, (cv_total + PAGE_SIZE - 1) // PAGE_SIZE)
 
-    if selected_iss is None:
-        return
+    while True:
+        cv_start = cv_page * PAGE_SIZE
+        cv_page_issues = cv_issues[cv_start : cv_start + PAGE_SIZE]
+
+        console.clear()
+        if cv_total_pages > 1:
+            print_muted(f"Page {cv_page + 1} of {cv_total_pages}  ({cv_total} issues total)")
+        print_cv_issues_table(cv_page_issues)
+
+        cv_nav = []
+        if cv_page > 0:
+            cv_nav.append("[p]rev")
+        if cv_page < cv_total_pages - 1:
+            cv_nav.append("[n]ext")
+        cv_nav.append("blank to cancel")
+        cv_prompt = f"Enter number (1–{len(cv_page_issues)}){', ' + ', '.join(cv_nav) if cv_nav else ''}:"
+
+        cv_raw = inquirer.text(message=cv_prompt).execute().strip()
+
+        if not cv_raw:
+            return
+        if cv_raw.lower() == "n" and cv_page < cv_total_pages - 1:
+            cv_page += 1
+        elif cv_raw.lower() == "p" and cv_page > 0:
+            cv_page -= 1
+        else:
+            try:
+                cv_idx = int(cv_raw) - 1
+                if cv_idx < 0 or cv_idx >= len(cv_page_issues):
+                    raise ValueError
+                selected_iss = cv_page_issues[cv_idx]
+                break
+            except ValueError:
+                print_error(f"Invalid input '{cv_raw}'. Enter a number between 1 and {len(cv_page_issues)}.")
 
     # Build defaults from ComicVine data
     credits = selected_iss.get("person_credits") or []
@@ -363,16 +472,7 @@ def edit_issue() -> None:
         session.close()
         return
 
-    choices = [
-        Choice(
-            value=issue.id,
-            name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
-                 f"#{issue.issue_number} LGY#{issue.legacy_number or '—'} — {issue.publication_date or 'no date'}",
-        )
-        for issue in issues
-    ]
-    choices.append(Choice(value=None, name="Cancel"))
-    selected_id = inquirer.select(message="Select issue to edit:", choices=choices).execute()
+    selected_id = _paginated_issue_select(issues, series_map)
 
     if selected_id is None:
         session.close()
@@ -439,16 +539,7 @@ def delete_issue() -> None:
         session.close()
         return
 
-    choices = [
-        Choice(
-            value=issue.id,
-            name=f"{series_map[issue.series_id].title} ({series_map[issue.series_id].start_year}) "
-                 f"#{issue.issue_number} — {issue.publication_date or 'no date'}",
-        )
-        for issue in issues
-    ]
-    choices.append(Choice(value=None, name="Cancel"))
-    selected_id = inquirer.select(message="Select issue to delete:", choices=choices).execute()
+    selected_id = _paginated_issue_select(issues, series_map)
 
     if selected_id is None:
         session.close()
