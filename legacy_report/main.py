@@ -23,7 +23,7 @@ def main(
         help="Show version and exit.",
     ),
 ) -> None:
-    """Launch the Legacy Report interactive menu."""
+    """Launch the Legacy Report Textual TUI."""
     init_db()
     from legacy_report.tui import LegacyReportApp
     LegacyReportApp().run()
