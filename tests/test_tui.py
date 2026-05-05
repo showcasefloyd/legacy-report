@@ -466,3 +466,208 @@ async def test_add_issue_saves_to_db(mem_engine):
                 series = session.get(Series, issue.series_id)
                 assert series.title == "Daredevil"
 
+
+# ---------------------------------------------------------------------------
+# AddIssueScreen — worker-driven step transitions (regression for run_in_thread)
+# ---------------------------------------------------------------------------
+
+_FAKE_VOLUMES = [
+    {
+        "id": 42,
+        "name": "Batman",
+        "start_year": "1940",
+        "publisher": {"name": "DC Comics"},
+        "count_of_issues": 5,
+        "description": None,
+    }
+]
+
+_FAKE_CV_ISSUES = [
+    {
+        "id": 1001,
+        "issue_number": "1",
+        "name": "The Batman Begins",
+        "cover_date": "1940-04-01",
+        "person_credits": [
+            {"name": "Bob Kane", "role": "writer"},
+            {"name": "Bill Finger", "role": "artist"},
+        ],
+        "image": {"medium_url": "https://example.com/img.jpg"},
+        "description": "First issue.",
+    }
+]
+
+
+@pytest.mark.asyncio
+async def test_fetch_volumes_worker_advances_to_step2(mem_engine):
+    """_fetch_volumes transitions to volume-select step when API returns results."""
+    from legacy_report.tui import _WIZARD_STEP_VOLUMES
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        with patch("legacy_report.tui.get_api_key", return_value="fakekey"):
+            with patch("legacy_report.comicvine.search_volumes", return_value=_FAKE_VOLUMES):
+                async with LegacyReportApp().run_test(headless=True) as pilot:
+                    await pilot.app.action_do_add()
+                    await pilot.pause()
+                    screen = pilot.app.screen
+                    assert isinstance(screen, AddIssueScreen)
+
+                    si = screen.query_one("#wiz-search-input", Input)
+                    si.value = "Batman"
+                    screen.on_input_submitted(Input.Submitted(si, "Batman"))
+                    # Allow worker + thread to complete
+                    for _ in range(5):
+                        await pilot.pause()
+
+                    assert screen._step == _WIZARD_STEP_VOLUMES
+                    assert len(screen._volumes) == 1
+                    table = screen.query_one("#wiz-volumes-table", DataTable)
+                    assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_volumes_no_results_stays_on_step1(mem_engine):
+    """_fetch_volumes stays on step 1 when no volumes survive the tier filter."""
+    from legacy_report.tui import _WIZARD_STEP_SEARCH
+
+    # Return a volume from a non-US/UK publisher so filter_volumes_by_tier drops it
+    other_vol = [{
+        "id": 99, "name": "Manga X", "start_year": "2000",
+        "publisher": {"name": "Shueisha"}, "count_of_issues": 10,
+    }]
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        with patch("legacy_report.tui.get_api_key", return_value="fakekey"):
+            with patch("legacy_report.comicvine.search_volumes", return_value=other_vol):
+                async with LegacyReportApp().run_test(headless=True) as pilot:
+                    await pilot.app.action_do_add()
+                    await pilot.pause()
+                    screen = pilot.app.screen
+                    assert isinstance(screen, AddIssueScreen)
+
+                    si = screen.query_one("#wiz-search-input", Input)
+                    si.value = "Manga X"
+                    screen.on_input_submitted(Input.Submitted(si, "Manga X"))
+                    for _ in range(5):
+                        await pilot.pause()
+
+                    assert screen._step == _WIZARD_STEP_SEARCH
+
+
+@pytest.mark.asyncio
+async def test_fetch_volumes_api_error_stays_on_step1(mem_engine):
+    """_fetch_volumes handles an API exception and keeps the wizard on step 1."""
+    from legacy_report.tui import _WIZARD_STEP_SEARCH
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        with patch("legacy_report.tui.get_api_key", return_value="fakekey"):
+            with patch(
+                "legacy_report.comicvine.search_volumes",
+                side_effect=RuntimeError("API down"),
+            ):
+                async with LegacyReportApp().run_test(headless=True) as pilot:
+                    await pilot.app.action_do_add()
+                    await pilot.pause()
+                    screen = pilot.app.screen
+                    assert isinstance(screen, AddIssueScreen)
+
+                    si = screen.query_one("#wiz-search-input", Input)
+                    si.value = "Batman"
+                    screen.on_input_submitted(Input.Submitted(si, "Batman"))
+                    for _ in range(5):
+                        await pilot.pause()
+
+                    assert screen._step == _WIZARD_STEP_SEARCH
+
+
+@pytest.mark.asyncio
+async def test_fetch_issues_worker_advances_to_step3(mem_engine):
+    """_fetch_issues transitions to issue-select step when volume issues are returned."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            screen._volumes = _FAKE_VOLUMES
+            screen._selected_volume = _FAKE_VOLUMES[0]
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=_FAKE_CV_ISSUES,
+            ):
+                screen.run_worker(screen._fetch_issues("42"), exclusive=True)
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._step == _WIZARD_STEP_ISSUES
+            assert len(screen._cv_issues) == 1
+            table = screen.query_one("#wiz-issues-table", DataTable)
+            assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wizard_back_navigation(mem_engine):
+    """Escape on step 2 returns to step 1 without leaving AddIssueScreen."""
+    from legacy_report.tui import _WIZARD_STEP_SEARCH, _WIZARD_STEP_VOLUMES
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            # Jump wizard to step 2 manually
+            screen._volumes = _FAKE_VOLUMES
+            screen._show_step(_WIZARD_STEP_VOLUMES)
+            await pilot.pause()
+            assert screen._step == _WIZARD_STEP_VOLUMES
+
+            # Press Esc — should go back to step 1, not pop the screen
+            await pilot.press("escape")
+            await pilot.pause()
+            assert isinstance(pilot.app.screen, AddIssueScreen)
+            assert screen._step == _WIZARD_STEP_SEARCH
+
+
+@pytest.mark.asyncio
+async def test_wizard_row_select_does_not_open_detail_modal(mem_engine):
+    """Selecting a row in the wizard's DataTable must NOT open IssueDetailScreen.
+
+    Regression: DataTable.RowSelected used to bubble up to LegacyReportApp
+    which called _show_detail(), overlaying the wizard with a detail modal.
+    """
+    from legacy_report.tui import _WIZARD_STEP_VOLUMES
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        with patch(
+            "legacy_report.comicvine.get_issues_for_volume",
+            return_value=_FAKE_CV_ISSUES,
+        ):
+            async with LegacyReportApp().run_test(headless=True) as pilot:
+                await pilot.app.action_do_add()
+                await pilot.pause()
+                screen = pilot.app.screen
+                assert isinstance(screen, AddIssueScreen)
+
+                # Put wizard on step 2 with a row ready to select
+                screen._volumes = _FAKE_VOLUMES
+                table = screen.query_one("#wiz-volumes-table", DataTable)
+                table.clear(columns=True)
+                table.add_columns("Title", "Year", "Publisher", "Issues")
+                table.add_row("Batman", "1940", "DC Comics", "5")
+                screen._show_step(_WIZARD_STEP_VOLUMES)
+                await pilot.pause()
+
+                # Simulate row selection (Enter on the DataTable)
+                screen.on_data_table_row_selected(
+                    DataTable.RowSelected(table, cursor_row=0, row_key=table.get_row_at(0))
+                )
+                await pilot.pause()
+
+                # Must still be on AddIssueScreen, not IssueDetailScreen
+                assert isinstance(pilot.app.screen, AddIssueScreen)
+
