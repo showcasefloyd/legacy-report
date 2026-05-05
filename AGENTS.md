@@ -6,14 +6,16 @@ This file defines how AI agents (GitHub Copilot, Claude Sonnet) should behave wh
 
 ## Project Overview
 
-**Legacy Report** is a terminal-based comic book tracking application built in Python 3.11. Users interact via a rich CLI interface to track their comic collection, reading progress, wishlists, and series metadata.
+**Legacy Report** is a full-screen terminal TUI for tracking your comic book collection, built in Python 3.11+. Users navigate via a Textual full-screen interface with a retro CRT-green aesthetic.
 
 **Stack:**
 
-- **UI:** [Typer](https://typer.tiangolo.com/) (CLI commands) + [InquirerPy](https://inquirerpy.readthedocs.io/) (interactive prompts) + [Rich](https://rich.readthedocs.io/) (terminal formatting)
-- **Database:** SQLite via Python's built-in `sqlite3` module (or SQLAlchemy if present)
-- **Language:** Python 3.11
-- **Tests:** pytest
+- **TUI:** [Textual](https://textual.textualize.io/) (full-screen, htop-style) — primary UI
+- **CLI entry point:** [Typer](https://typer.tiangolo.com/) + [Rich](https://rich.readthedocs.io/)
+- **Legacy UI:** [InquirerPy](https://inquirerpy.readthedocs.io/) — retained in `menu.py` for test coverage only, not used at runtime
+- **Database:** SQLite via SQLAlchemy/SQLModel (ORM), stored at `~/.local/share/legacy-report/collection.db`
+- **Language:** Python 3.11+ (3.13.5 in use)
+- **Tests:** pytest + pytest-asyncio (STRICT mode)
 
 ---
 
@@ -134,14 +136,27 @@ This project uses **pytest**.
 2. You have run the full test suite and it passes
 3. You have confirmed the previously-passing tests still pass
 
-**Two test layers are required for this project:**
+**Three test layers are required for this project:**
 
 | Layer      | File                       | What to test                                                                                    |
 | ---------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
 | Data layer | `tests/test_collection.py` | CRUD functions in `db.py` — use an in-memory SQLite session, no mocks                           |
 | Menu layer | `tests/test_menu_flows.py` | Full menu flows with mocked InquirerPy prompts + `gc.collect()` between select and mutate steps |
+| TUI layer  | `tests/test_tui.py`        | Headless Textual screens via `App.run_test(headless=True)`, patched `get_engine`                |
 
 The menu layer tests exist specifically to catch `ObjectDereferencedError` and session lifecycle bugs that the data layer tests cannot see — InquirerPy runs an asyncio event loop between prompts, which gives CPython's GC a chance to collect SQLAlchemy weak references. Always include a GC pressure test when adding a new menu flow that mutates data.
+
+**Textual test pattern:**
+
+```python
+with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+    async with LegacyReportApp().run_test(headless=True) as pilot:
+        await pilot.press("d")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DeleteConfirmScreen)
+```
+
+All async Textual test functions need `@pytest.mark.asyncio` (pytest-asyncio STRICT mode).
 
 **Mock pattern for InquirerPy in tests:**
 
@@ -209,12 +224,24 @@ For UI changes (Rich output, InquirerPy prompts), manually invoke the command an
 
 ```
 .
-├── main.py               # Typer app entrypoint
-├── collection.db             # SQLite database (gitignored)
-├── scripts/              # Dev utility scripts (seed, reset, migrate)
-├── tests/                # pytest test files
+├── legacy_report/
+│   ├── main.py           # Typer entry point — calls LegacyReportApp().run()
+│   ├── tui.py            # Textual app + all screens (primary UI)
+│   ├── menu.py           # InquirerPy flows (retained for test_menu_flows.py only)
+│   ├── db.py             # All DB mutations — single data layer
+│   ├── models.py         # SQLModel ORM models (Series, Issue)
+│   ├── comicvine.py      # ComicVine API client with cache
+│   ├── config.py         # Config read/write (~/.config/legacy-report/config.json)
+│   ├── display.py        # Rich table helpers
+│   └── publishers.py     # Publisher tier filter for CV volume results
+├── tests/
+│   ├── test_collection.py  # Data layer CRUD (in-memory SQLite)
+│   ├── test_menu_flows.py  # InquirerPy mocked menu flows
+│   └── test_tui.py         # Headless Textual tests (App.run_test)
+├── pyproject.toml        # Dependencies and entry point
 ├── AGENTS.md             # This file
-└── ...                   # Other modules (db, models, ui, etc.)
+├── CLAUDE.md             # Quick-ref for Claude agents
+└── TODOS.md              # Live work backlog
 ```
 
 Update this tree if the structure changes significantly.
