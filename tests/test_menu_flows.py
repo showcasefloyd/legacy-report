@@ -316,3 +316,116 @@ class TestDeleteIssueFlow:
 
         assert session.get(Issue, issue1_id) is None
         assert session.get(Issue, issue2_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# add_issue display regression
+# ---------------------------------------------------------------------------
+
+class TestAddIssueDisplay:
+    """Guard against the table+list double-render regression.
+
+    Volumes must be displayed as a Rich table (print_volumes_table) and selected
+    by number prompt — NOT via an InquirerPy select list, which would render the
+    same items a second time directly below the table.
+    """
+
+    # Minimal fake volumes returned by the ComicVine API
+    _FAKE_VOLUMES = [
+        {
+            "id": "1234",
+            "name": "Amazing Spider-Man",
+            "start_year": 1963,
+            "publisher": {"name": "Marvel Comics"},
+            "count_of_issues": 700,
+            "description": "",
+        },
+        {
+            "id": "5678",
+            "name": "Amazing Spider-Man Vol 2",
+            "start_year": 1999,
+            "publisher": {"name": "Marvel Comics"},
+            "count_of_issues": 58,
+            "description": "",
+        },
+    ]
+
+    def test_add_issue_shows_table_not_select_list(self, session):
+        """Table must be printed; inquirer.select must NOT be called for volume selection."""
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.filter_volumes_by_tier",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.print_volumes_table") as mock_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock("Spider-Man", "")),  # query, then blank to cancel
+            patch("legacy_report.menu.inquirer.select") as mock_select,
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        mock_table.assert_called_once_with(self._FAKE_VOLUMES)
+        mock_select.assert_not_called()
+
+    def test_add_issue_number_selection_picks_correct_volume(self, session):
+        """Entering '1' at the number prompt selects the first volume."""
+        fake_issue = {
+            "id": "999",
+            "issue_number": "1",
+            "name": "Spider-Man Fights Crime",
+            "cover_date": "1963-03-01",
+            "description": "",
+            "image": {},
+            "person_credits": [],
+        }
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.filter_volumes_by_tier",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=[fake_issue]),
+            patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Spider-Man",  # search query
+                "1",           # volume number selection
+                "1",           # issue_number field
+                "",            # legacy_number
+                "1963-03-01",  # pub date
+                "",            # story_title
+                "",            # writer
+                "",            # artist
+            )),
+            patch("legacy_report.menu.inquirer.select",
+                  _single_mock(fake_issue)),  # issue select (still uses select)
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        from legacy_report.models import Series
+        from sqlmodel import select as sql_select
+        series = session.exec(sql_select(Series)).first()
+        assert series is not None
+        assert series.title == "Amazing Spider-Man"
+
+    def test_add_issue_invalid_number_returns_error(self, session):
+        """Entering a number out of range shows an error and does not proceed."""
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.filter_volumes_by_tier",
+                  return_value=self._FAKE_VOLUMES),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume") as mock_issues,
+            patch("legacy_report.menu.inquirer.text",
+                  _text_mock("Spider-Man", "99")),  # 99 is out of range
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        mock_issues.assert_not_called()

@@ -238,19 +238,16 @@ def add_issue() -> None:
         return
 
     print_volumes_table(volumes)
-    volume_choices = [
-        Choice(
-            value=vol,
-            name=f"{vol.get('name')} ({vol.get('start_year') or '?'}) — "
-                 f"{(vol.get('publisher') or {}).get('name', '?')} — "
-                 f"{vol.get('count_of_issues', '?')} issues",
-        )
-        for vol in volumes
-    ]
-    volume_choices.append(Choice(value=None, name="Cancel"))
-    selected_vol = inquirer.select(message="Select series:", choices=volume_choices).execute()
-
-    if selected_vol is None:
+    raw = inquirer.text(message=f"Enter number (1–{len(volumes)}) or blank to cancel:").execute()
+    if not raw.strip():
+        return
+    try:
+        idx = int(raw.strip()) - 1
+        if idx < 0 or idx >= len(volumes):
+            raise ValueError
+        selected_vol = volumes[idx]
+    except ValueError:
+        print_error(f"Invalid selection '{raw.strip()}'. Enter a number between 1 and {len(volumes)}.")
         return
 
     print_info(f"Fetching issues for {selected_vol['name']}...")
