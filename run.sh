@@ -16,4 +16,4 @@ if [[ ! -f "$VENV/bin/legacy-report" ]]; then
     "$VENV/bin/pip" install -e . --quiet
 fi
 
-exec "$VENV/bin/legacy-report"
+exec "$VENV/bin/legacy-report" "$@"
