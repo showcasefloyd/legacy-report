@@ -447,7 +447,7 @@ class ConfigScreen(Screen):
 
     async def _validate_and_save(self, key: str) -> None:
         from legacy_report import comicvine
-        valid = await self.app.run_in_thread(comicvine.validate_api_key, key)
+        valid = await asyncio.to_thread(comicvine.validate_api_key, key)
         if valid:
             set_api_key(key)
             masked = f"{key[:4]}{'*' * max(0, len(key) - 4)}" if len(key) > 4 else key
