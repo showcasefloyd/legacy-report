@@ -8,3 +8,12 @@ build/
 .eggs/
 *.db
 *.sqlite3
+
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.bak
+*.swp
+*.tmp
+*.env
