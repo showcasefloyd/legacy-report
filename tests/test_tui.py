@@ -14,6 +14,8 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from legacy_report.models import Issue, Series
 from legacy_report.tui import (
+    AddIssueScreen,
+    ConfigScreen,
     DeleteConfirmScreen,
     EditIssueScreen,
     IssueDetailScreen,
@@ -299,4 +301,147 @@ async def test_export_csv_writes_file(seeded_engine, tmp_path):
     rows = list(csv_mod.reader(out.open()))
     assert len(rows) == 2   # header + 1 issue
     assert rows[1][0] == "Amazing Spider-Man"
+
+
+# ---------------------------------------------------------------------------
+# ConfigScreen
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_config_screen_opens(mem_engine):
+    """Pressing c pushes ConfigScreen onto the screen stack."""
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            app.action_do_config()
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigScreen)
+
+
+@pytest.mark.asyncio
+async def test_config_screen_back_pops(mem_engine):
+    """Pressing Esc on ConfigScreen returns to main screen."""
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            app.action_do_config()
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfigScreen)
+
+
+@pytest.mark.asyncio
+async def test_config_screen_shows_masked_key(mem_engine):
+    """ConfigScreen masks an existing API key in the display label."""
+    with patch("legacy_report.tui.get_config", return_value={
+        "comicvine_api_key": "abcd1234efgh",
+        "cache_ttl_hours": 24,
+        "db_path": "~/.local/share/legacy-report/collection.db",
+    }):
+        with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+            async with LegacyReportApp().run_test(headless=True) as pilot:
+                app = pilot.app
+                app.action_do_config()
+                await pilot.pause()
+                screen = app.screen
+                assert isinstance(screen, ConfigScreen)
+                display = screen.query_one("#cfg-key-display", Label)
+                assert display.content.startswith("abcd")
+                assert "*" in display.content
+
+
+# ---------------------------------------------------------------------------
+# AddIssueScreen wizard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_add_issue_screen_opens(mem_engine):
+    """Pressing a pushes AddIssueScreen."""
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            assert isinstance(pilot.app.screen, AddIssueScreen)
+
+
+@pytest.mark.asyncio
+async def test_add_issue_escape_cancels(mem_engine):
+    """Pressing Esc on step 1 dismisses the wizard."""
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(pilot.app.screen, AddIssueScreen)
+
+
+@pytest.mark.asyncio
+async def test_add_issue_search_shows_volumes(mem_engine):
+    """After volumes are loaded the wizard transitions to step 2 and fills the table."""
+    fake_volumes = [
+        {"id": 1, "name": "Amazing Spider-Man", "start_year": 1963,
+         "publisher": {"name": "Marvel"}, "count_of_issues": 441}
+    ]
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            # Directly simulate the post-fetch state transition
+            from legacy_report.tui import _WIZARD_STEP_VOLUMES
+            from textual.widgets import DataTable
+            screen._volumes = fake_volumes
+            table = screen.query_one("#wiz-volumes-table", DataTable)
+            table.clear(columns=True)
+            table.add_columns("#", "Title", "Year", "Publisher", "Issues")
+            table.add_row("1", "Amazing Spider-Man", "1963", "Marvel", "441")
+            screen._show_step(_WIZARD_STEP_VOLUMES)
+            await pilot.pause()
+
+            assert screen._step == _WIZARD_STEP_VOLUMES
+            assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_add_issue_saves_to_db(mem_engine):
+    """action_save_issue on step 4 writes an Issue row to the DB."""
+    from legacy_report.tui import _WIZARD_STEP_CONFIRM
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            # Inject wizard state as if steps 1-3 were completed
+            screen._selected_volume = {
+                "id": 99, "name": "Daredevil", "start_year": 1964,
+                "publisher": {"name": "Marvel"}, "description": None,
+            }
+            screen._selected_cv_issue = {
+                "id": 1001, "issue_number": "1", "name": "The Man Without Fear",
+                "cover_date": "1964-04-01", "person_credits": [],
+                "image": {}, "description": None,
+            }
+            screen._step = _WIZARD_STEP_CONFIRM
+            screen._show_step(_WIZARD_STEP_CONFIRM)
+            await pilot.pause()
+
+            # Fill required field
+            from textual.widgets import Input
+            screen.query_one("#wiz-issue-number", Input).value = "1"
+            screen.action_save_issue()
+            await pilot.pause()
+
+            with Session(mem_engine) as session:
+                issue = session.exec(select(Issue)).first()
+                assert issue is not None
+                assert issue.issue_number == "1"
+                series = session.get(Series, issue.series_id)
+                assert series.title == "Daredevil"
 

@@ -16,16 +16,18 @@ from typing import Optional
 from sqlmodel import select, Session
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, ListItem, ListView, Static
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, DataTable, Footer, Input, Label, ListItem, ListView, LoadingIndicator, Static
 
 from legacy_report import __version__
-from legacy_report.config import get_config
+from legacy_report.config import get_api_key, get_config, set_api_key
+from legacy_report.db import create_issue as db_create_issue
 from legacy_report.db import delete_issue as db_delete_issue
-from legacy_report.db import get_engine, update_issue
+from legacy_report.db import get_engine, get_or_create_series, update_issue
 from legacy_report.models import Issue, Series
+from legacy_report.publishers import filter_volumes_by_tier
 
 _ALL_SERIES_ID = -1
 
@@ -305,6 +307,577 @@ class EditIssueScreen(ModalScreen):
             )
 
         self.dismiss(True)
+
+
+# ── Config screen ─────────────────────────────────────────────────────────────
+
+class ConfigScreen(Screen):
+    """Full-screen configuration panel — push via 'c'."""
+
+    BINDINGS = [
+        Binding("escape", "go_back", "Back"),
+        Binding("ctrl+s", "save_key", "Save Key"),
+    ]
+
+    DEFAULT_CSS = """
+    ConfigScreen {
+        background: #0d0d0d;
+        color: #00ff41;
+    }
+    ConfigScreen #cfg-header {
+        background: #003300;
+        color: #00ff41;
+        content-align: center middle;
+        text-style: bold;
+        height: 1;
+    }
+    ConfigScreen #cfg-body {
+        padding: 1 2;
+    }
+    ConfigScreen .cfg-section-title {
+        color: #00ff41;
+        text-style: bold;
+        margin-top: 1;
+        margin-bottom: 0;
+    }
+    ConfigScreen .cfg-row {
+        height: 3;
+        margin-bottom: 0;
+    }
+    ConfigScreen .cfg-label {
+        width: 18;
+        content-align: right middle;
+        color: #00aa22;
+        padding-right: 1;
+    }
+    ConfigScreen .cfg-value {
+        color: #00cc33;
+        content-align: left middle;
+        width: 1fr;
+    }
+    ConfigScreen .cfg-input {
+        width: 1fr;
+        background: #002200;
+        color: #00ff41;
+        border: tall #1a6e1a;
+    }
+    ConfigScreen .cfg-input:focus {
+        border: tall #00ff41;
+    }
+    ConfigScreen #cfg-buttons {
+        height: 3;
+        margin-top: 1;
+        align: left middle;
+    }
+    ConfigScreen Button {
+        margin-right: 1;
+        background: #002200;
+        border: tall #1a6e1a;
+        color: #00ff41;
+        min-width: 18;
+    }
+    ConfigScreen Button:focus,
+    ConfigScreen Button:hover {
+        background: #004400;
+        border: tall #00ff41;
+    }
+    ConfigScreen #cfg-status {
+        margin-top: 1;
+        color: #00cc33;
+        height: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        config = get_config()
+        raw_key = config.get("comicvine_api_key", "")
+        masked = (
+            f"{raw_key[:4]}{'*' * max(0, len(raw_key) - 4)}"
+            if len(raw_key) > 4 else ("(not set)" if not raw_key else raw_key)
+        )
+        yield Label("  LEGACY REPORT — CONFIGURATION", id="cfg-header")
+        with ScrollableContainer(id="cfg-body"):
+            yield Label("API Key", classes="cfg-section-title")
+            yield Horizontal(
+                Label("Current key:", classes="cfg-label"),
+                Label(masked, id="cfg-key-display", classes="cfg-value"),
+                classes="cfg-row",
+            )
+            yield Horizontal(
+                Label("New key:", classes="cfg-label"),
+                Input(password=True, placeholder="Paste new ComicVine API key…", id="cfg-key-input", classes="cfg-input"),
+                classes="cfg-row",
+            )
+            with Horizontal(id="cfg-buttons"):
+                yield Button("Validate & Save  Ctrl+S", id="btn-save-key")
+                yield Button("Back  Esc", id="btn-back")
+            yield Label("", id="cfg-status")
+
+            yield Label("Database & Cache", classes="cfg-section-title")
+            yield Horizontal(
+                Label("DB path:", classes="cfg-label"),
+                Label(config.get("db_path", ""), classes="cfg-value"),
+                classes="cfg-row",
+            )
+            yield Horizontal(
+                Label("Cache TTL:", classes="cfg-label"),
+                Label(f"{config.get('cache_ttl_hours', 24)} hours", classes="cfg-value"),
+                classes="cfg-row",
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-save-key":
+            self.action_save_key()
+        elif event.button.id == "btn-back":
+            self.action_go_back()
+
+    def action_go_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_save_key(self) -> None:
+        key = self.query_one("#cfg-key-input", Input).value.strip()
+        if not key:
+            self._set_status("Enter a key first.", error=True)
+            return
+        self._set_status("Validating…")
+        self.run_worker(self._validate_and_save(key), exclusive=True)
+
+    async def _validate_and_save(self, key: str) -> None:
+        from legacy_report import comicvine
+        valid = await self.app.run_in_thread(comicvine.validate_api_key, key)
+        if valid:
+            set_api_key(key)
+            masked = f"{key[:4]}{'*' * max(0, len(key) - 4)}" if len(key) > 4 else key
+            self.query_one("#cfg-key-display", Label).update(masked)
+            self.query_one("#cfg-key-input", Input).value = ""
+            self._set_status("✓ API key saved.")
+            self.notify("API key saved.")
+        else:
+            self._set_status("✗ Validation failed — check the key.", error=True)
+
+    def _set_status(self, msg: str, *, error: bool = False) -> None:
+        label = self.query_one("#cfg-status", Label)
+        label.update(msg)
+        label.styles.color = "#ff4444" if error else "#00cc33"
+
+
+# ── Add Issue wizard ──────────────────────────────────────────────────────────
+
+_WIZARD_STEP_SEARCH   = "search"
+_WIZARD_STEP_VOLUMES  = "volumes"
+_WIZARD_STEP_ISSUES   = "issues"
+_WIZARD_STEP_CONFIRM  = "confirm"
+
+
+class AddIssueScreen(Screen):
+    """Multi-step wizard: search ComicVine → pick volume → pick issue → confirm."""
+
+    BINDINGS = [
+        Binding("escape", "go_back_or_cancel", "Back / Cancel"),
+        Binding("ctrl+s", "save_issue", "Save", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    AddIssueScreen {
+        background: #0d0d0d;
+        color: #00ff41;
+    }
+    AddIssueScreen #wiz-header {
+        background: #003300;
+        color: #00ff41;
+        content-align: center middle;
+        text-style: bold;
+        height: 1;
+    }
+    AddIssueScreen #wiz-step-label {
+        background: #002200;
+        color: #00aa22;
+        height: 1;
+        padding: 0 2;
+    }
+    AddIssueScreen #wiz-body {
+        padding: 1 2;
+        height: 1fr;
+    }
+    AddIssueScreen .wiz-prompt {
+        height: 3;
+        margin-bottom: 1;
+    }
+    AddIssueScreen .wiz-input {
+        width: 1fr;
+        background: #002200;
+        color: #00ff41;
+        border: tall #1a6e1a;
+    }
+    AddIssueScreen .wiz-input:focus {
+        border: tall #00ff41;
+    }
+    AddIssueScreen DataTable {
+        height: 1fr;
+        background: #0d0d0d;
+    }
+    AddIssueScreen DataTable > .datatable--header {
+        background: #001a00;
+        color: #00ff41;
+        text-style: bold;
+    }
+    AddIssueScreen DataTable > .datatable--cursor {
+        background: #004400;
+        color: #00ff41;
+        text-style: bold;
+    }
+    AddIssueScreen LoadingIndicator {
+        background: #0d0d0d;
+        color: #00ff41;
+    }
+    AddIssueScreen .field-row { height: 3; margin-bottom: 0; }
+    AddIssueScreen .field-label {
+        width: 15;
+        content-align: right middle;
+        color: #00aa22;
+        padding-right: 1;
+    }
+    AddIssueScreen .field-input {
+        width: 1fr;
+        background: #002200;
+        color: #00ff41;
+        border: tall #1a6e1a;
+    }
+    AddIssueScreen .field-input:focus { border: tall #00ff41; }
+    AddIssueScreen #wiz-buttons {
+        height: 3;
+        margin-top: 1;
+        align: left middle;
+    }
+    AddIssueScreen Button {
+        margin-right: 1;
+        background: #002200;
+        border: tall #1a6e1a;
+        color: #00ff41;
+        min-width: 16;
+    }
+    AddIssueScreen Button:focus,
+    AddIssueScreen Button:hover {
+        background: #004400;
+        border: tall #00ff41;
+    }
+    AddIssueScreen #lgy-hint {
+        color: #00aa22;
+        height: 1;
+        margin-bottom: 1;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._step: str = _WIZARD_STEP_SEARCH
+        self._volumes: list[dict] = []
+        self._cv_issues: list[dict] = []
+        self._selected_volume: Optional[dict] = None
+        self._selected_cv_issue: Optional[dict] = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("  LEGACY REPORT — ADD ISSUE", id="wiz-header")
+        yield Label("  Step 1 of 4 — Search ComicVine", id="wiz-step-label")
+        with ScrollableContainer(id="wiz-body"):
+            # Step 1: search input
+            yield Input(
+                placeholder="Search ComicVine by title…",
+                id="wiz-search-input",
+                classes="wiz-input wiz-prompt",
+            )
+            # Step 2 & 3: results tables (hidden until needed)
+            yield DataTable(id="wiz-volumes-table", cursor_type="row", zebra_stripes=True)
+            yield DataTable(id="wiz-issues-table",  cursor_type="row", zebra_stripes=True)
+            yield LoadingIndicator(id="wiz-loading")
+            # Step 4: confirm / edit fields (hidden until needed)
+            yield Label("", id="lgy-hint")
+            yield Horizontal(
+                Label("Issue #",    classes="field-label"),
+                Input(id="wiz-issue-number",  classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("LGY #",      classes="field-label"),
+                Input(id="wiz-legacy-number", classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Pub Date",   classes="field-label"),
+                Input(id="wiz-pub-date",      classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Story",      classes="field-label"),
+                Input(id="wiz-story-title",   classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Writer",     classes="field-label"),
+                Input(id="wiz-writer",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Artist",     classes="field-label"),
+                Input(id="wiz-artist",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Rating 1-5", classes="field-label"),
+                Input(id="wiz-rating",        classes="field-input"),
+                classes="field-row",
+            )
+            with Horizontal(id="wiz-buttons"):
+                yield Button("Save  Ctrl+S", id="btn-wiz-save")
+                yield Button("Cancel  Esc",  id="btn-wiz-cancel")
+
+    def on_mount(self) -> None:
+        self._show_step(_WIZARD_STEP_SEARCH)
+        self.query_one("#wiz-search-input", Input).focus()
+
+    # ── Step visibility ───────────────────────────────────────────────────────
+
+    def _show_step(self, step: str) -> None:
+        self._step = step
+        labels = {
+            _WIZARD_STEP_SEARCH:  "  Step 1 of 4 — Search ComicVine",
+            _WIZARD_STEP_VOLUMES: "  Step 2 of 4 — Select Series",
+            _WIZARD_STEP_ISSUES:  "  Step 3 of 4 — Select Issue",
+            _WIZARD_STEP_CONFIRM: "  Step 4 of 4 — Confirm & Save",
+        }
+        self.query_one("#wiz-step-label", Label).update(labels.get(step, ""))
+
+        self.query_one("#wiz-search-input",  Input).display  = (step == _WIZARD_STEP_SEARCH)
+        self.query_one("#wiz-volumes-table", DataTable).display = (step == _WIZARD_STEP_VOLUMES)
+        self.query_one("#wiz-issues-table",  DataTable).display = (step == _WIZARD_STEP_ISSUES)
+        self.query_one("#wiz-loading",       LoadingIndicator).display = False
+
+        confirm = (step == _WIZARD_STEP_CONFIRM)
+        for wid in ("lgy-hint", "wiz-issue-number", "wiz-legacy-number",
+                    "wiz-pub-date", "wiz-story-title", "wiz-writer",
+                    "wiz-artist", "wiz-rating", "wiz-buttons"):
+            try:
+                self.query_one(f"#{wid}").display = confirm
+            except Exception:
+                pass
+
+    def _show_loading(self) -> None:
+        for wid in ("wiz-search-input", "wiz-volumes-table", "wiz-issues-table"):
+            self.query_one(f"#{wid}").display = False
+        self.query_one("#wiz-loading", LoadingIndicator).display = True
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "wiz-search-input" and self._step == _WIZARD_STEP_SEARCH:
+            query = event.value.strip()
+            if query:
+                self._show_loading()
+                self.run_worker(self._fetch_volumes(query), exclusive=True)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if self._step == _WIZARD_STEP_VOLUMES:
+            idx = event.cursor_row
+            if 0 <= idx < len(self._volumes):
+                self._selected_volume = self._volumes[idx]
+                self._show_loading()
+                self.run_worker(
+                    self._fetch_issues(str(self._selected_volume["id"])),
+                    exclusive=True,
+                )
+        elif self._step == _WIZARD_STEP_ISSUES:
+            idx = event.cursor_row
+            if 0 <= idx < len(self._cv_issues):
+                self._selected_cv_issue = self._cv_issues[idx]
+                self.run_worker(self._prepare_confirm(), exclusive=True)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-wiz-save":
+            self.action_save_issue()
+        elif event.button.id == "btn-wiz-cancel":
+            self.app.pop_screen()
+
+    # ── Workers ───────────────────────────────────────────────────────────────
+
+    async def _fetch_volumes(self, query: str) -> None:
+        from legacy_report import comicvine
+        try:
+            volumes = await self.app.run_in_thread(comicvine.search_volumes, query)
+            volumes = filter_volumes_by_tier(volumes)
+        except Exception as e:
+            self.notify(str(e), title="Search Failed", severity="error")
+            self._show_step(_WIZARD_STEP_SEARCH)
+            return
+
+        if not volumes:
+            self.notify("No results found.", severity="warning")
+            self._show_step(_WIZARD_STEP_SEARCH)
+            return
+
+        self._volumes = volumes
+        table = self.query_one("#wiz-volumes-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("#", "Title", "Year", "Publisher", "Issues")
+        for i, v in enumerate(volumes, 1):
+            pub = (v.get("publisher") or {}).get("name", "—")
+            table.add_row(
+                str(i), v.get("name", "—"),
+                str(v.get("start_year") or "—"),
+                pub,
+                str(v.get("count_of_issues", "—")),
+            )
+        self._show_step(_WIZARD_STEP_VOLUMES)
+        table.focus()
+
+    async def _fetch_issues(self, volume_id: str) -> None:
+        from legacy_report import comicvine
+        try:
+            issues = await self.app.run_in_thread(
+                comicvine.get_issues_for_volume, volume_id
+            )
+        except Exception as e:
+            self.notify(str(e), title="Fetch Failed", severity="error")
+            self._show_step(_WIZARD_STEP_VOLUMES)
+            return
+
+        if not issues:
+            self.notify("No issues found for this series.", severity="warning")
+            self._show_step(_WIZARD_STEP_VOLUMES)
+            return
+
+        self._cv_issues = issues
+        table = self.query_one("#wiz-issues-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("#", "Issue #", "Story Title", "Cover Date")
+        for i, iss in enumerate(issues, 1):
+            table.add_row(
+                str(i),
+                iss.get("issue_number", "—"),
+                iss.get("name") or "—",
+                iss.get("cover_date", "—"),
+            )
+        self._show_step(_WIZARD_STEP_ISSUES)
+        table.focus()
+
+    async def _prepare_confirm(self) -> None:
+        from legacy_report import comicvine
+        iss = self._selected_cv_issue
+        vol = self._selected_volume
+
+        # Extract credits
+        credits = iss.get("person_credits") or []
+        writer = next((p["name"] for p in credits if "writer" in (p.get("role") or "").lower()), "")
+        artist = next((p["name"] for p in credits if "artist" in (p.get("role") or "").lower()), "")
+
+        # Auto-calc LGY in background thread
+        lgy = ""
+        try:
+            lgy = await self.app.run_in_thread(
+                comicvine.calculate_lgy_number, vol, iss.get("issue_number", "")
+            ) or ""
+        except Exception:
+            pass
+
+        # Pre-fill fields
+        self.query_one("#wiz-issue-number",  Input).value = iss.get("issue_number", "")
+        self.query_one("#wiz-legacy-number", Input).value = lgy
+        self.query_one("#wiz-pub-date",      Input).value = iss.get("cover_date", "")
+        self.query_one("#wiz-story-title",   Input).value = iss.get("name") or ""
+        self.query_one("#wiz-writer",        Input).value = writer
+        self.query_one("#wiz-artist",        Input).value = artist
+        self.query_one("#wiz-rating",        Input).value = ""
+
+        hint = f"Auto-calculated LGY #{lgy}" if lgy else "LGY # could not be auto-calculated"
+        self.query_one("#lgy-hint", Label).update(f"  {hint}")
+
+        self._show_step(_WIZARD_STEP_CONFIRM)
+        self.query_one("#wiz-issue-number", Input).focus()
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+
+    def action_save_issue(self) -> None:
+        if self._step != _WIZARD_STEP_CONFIRM:
+            return
+
+        def val(wid: str) -> str:
+            return self.query_one(f"#{wid}", Input).value.strip()
+
+        issue_number = val("wiz-issue-number")
+        if not issue_number:
+            self.notify("Issue # is required.", severity="error")
+            return
+
+        pub_date_raw = val("wiz-pub-date")
+        pub_date: Optional[date] = None
+        if pub_date_raw:
+            try:
+                pub_date = date.fromisoformat(pub_date_raw[:10])
+            except ValueError:
+                self.notify("Invalid date — use YYYY-MM-DD.", severity="error")
+                return
+
+        rating_raw = val("wiz-rating")
+        rating: Optional[int] = None
+        if rating_raw:
+            try:
+                r = int(rating_raw)
+                if not 1 <= r <= 5:
+                    raise ValueError
+                rating = r
+            except ValueError:
+                self.notify("Rating must be 1–5 or blank.", severity="error")
+                return
+
+        vol = self._selected_volume
+        iss = self._selected_cv_issue
+        pub_data = (vol.get("publisher") or {})
+
+        with Session(get_engine()) as session:
+            series, _ = get_or_create_series(
+                session,
+                title=vol["name"],
+                start_year=int(vol.get("start_year") or 0),
+                publisher=pub_data.get("name"),
+                comicvine_id=str(vol["id"]),
+                description=vol.get("description"),
+            )
+            db_create_issue(
+                session,
+                series_id=series.id,
+                issue_number=issue_number,
+                legacy_number=val("wiz-legacy-number") or None,
+                publication_date=pub_date,
+                story_title=val("wiz-story-title") or None,
+                writer=val("wiz-writer") or None,
+                artist=val("wiz-artist") or None,
+                description=iss.get("description") if iss else None,
+                cover_image_url=(iss.get("image") or {}).get("medium_url") if iss else None,
+                comicvine_id=str(iss["id"]) if iss else None,
+                rating=rating,
+            )
+
+        self.notify(f"Added: {vol['name']} #{issue_number}")
+        self.dismiss(True)
+
+    def action_go_back_or_cancel(self) -> None:
+        step_order = [
+            _WIZARD_STEP_SEARCH,
+            _WIZARD_STEP_VOLUMES,
+            _WIZARD_STEP_ISSUES,
+            _WIZARD_STEP_CONFIRM,
+        ]
+        idx = step_order.index(self._step) if self._step in step_order else 0
+        if idx == 0:
+            self.app.pop_screen()
+        else:
+            self._show_step(step_order[idx - 1])
+            # Re-focus the right widget
+            if step_order[idx - 1] == _WIZARD_STEP_SEARCH:
+                self.query_one("#wiz-search-input", Input).focus()
+            elif step_order[idx - 1] == _WIZARD_STEP_VOLUMES:
+                self.query_one("#wiz-volumes-table", DataTable).focus()
+            elif step_order[idx - 1] == _WIZARD_STEP_ISSUES:
+                self.query_one("#wiz-issues-table", DataTable).focus()
 
 
 # ── Main app ──────────────────────────────────────────────────────────────────
@@ -699,21 +1272,13 @@ class LegacyReportApp(App):
             self.notify(str(e), title="Export Failed", severity="error")
 
     async def action_do_add(self) -> None:
-        # Phase 4 — AddIssueScreen not yet built; suspend for now
-        import gc
-        from legacy_report.menu import add_issue
-        with self.suspend():
-            add_issue()
-        gc.collect()
-        await self._load_data(restore_series_id=self._current_series_id)
+        async def on_added(saved: bool) -> None:
+            if saved:
+                await self._load_data(restore_series_id=self._current_series_id)
+        self.push_screen(AddIssueScreen(), on_added)
 
     def action_do_config(self) -> None:
-        # Phase 3 — ConfigScreen not yet built; suspend for now
-        import gc
-        from legacy_report.menu import setup_config
-        with self.suspend():
-            setup_config()
-        gc.collect()
+        self.push_screen(ConfigScreen())
 
     def action_switch_focus(self) -> None:
         table = self.query_one("#issues-table", DataTable)
