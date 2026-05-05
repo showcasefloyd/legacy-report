@@ -514,38 +514,6 @@ class AddIssueScreen(Screen):
     AddIssueScreen .wiz-input:focus {
         border: solid #00ff41;
     }
-    AddIssueScreen DataTable {
-        height: 1fr;
-        background: #0d0d0d;
-        border: none;
-    }
-    AddIssueScreen DataTable > .datatable--header {
-        background: #001a00;
-        color: #00ff41;
-        text-style: bold;
-    }
-    AddIssueScreen DataTable > .datatable--header-cursor {
-        background: #004400;
-        color: #00ff41;
-        text-style: bold;
-    }
-    AddIssueScreen DataTable > .datatable--odd-row {
-        background: #0d0d0d;
-        color: #00ff41;
-    }
-    AddIssueScreen DataTable > .datatable--even-row {
-        background: #001500;
-        color: #00cc33;
-    }
-    AddIssueScreen DataTable > .datatable--cursor {
-        background: #004400;
-        color: #00ff41;
-        text-style: bold;
-    }
-    AddIssueScreen DataTable > .datatable--hover {
-        background: #002200;
-        color: #00ff41;
-    }
     AddIssueScreen LoadingIndicator {
         background: #0d0d0d;
         color: #00ff41;
