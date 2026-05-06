@@ -83,6 +83,10 @@ Page turns call `_fetch_issues(volume_id, offset)` in a worker thread. The exist
 
 No changes to the cache layer. Each `(volume_id, offset)` combination maps to a unique cache key because `offset` is part of `params`. Revisiting a page (e.g. going forward then back) hits the cache and is instant.
 
+The global `cache_ttl_hours` default is reduced from 24h to **12h** in `config.py`. This is a pragmatic middle ground: back-catalog data is stable enough that 12h is still very conservative, while ongoing series see a new issue at most monthly — 12h keeps the wizard reasonably fresh without hammering the ComicVine rate limit.
+
+A per-volume cache invalidation ("Refresh") button is tracked separately in GitHub issue #10.
+
 ---
 
 ## Error Handling
