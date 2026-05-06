@@ -412,7 +412,7 @@ def add_issue() -> None:
 
     cv_page = 0
     selected_iss = None
-    cv_total = len(cv_issues)
+    cv_total = _cv_page["total"]
     cv_total_pages = max(1, (cv_total + PAGE_SIZE - 1) // PAGE_SIZE)
 
     while True:

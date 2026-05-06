@@ -697,4 +697,5 @@ async def test_fetch_issues_stores_total_and_offset(mem_engine):
             assert screen._step == _WIZARD_STEP_ISSUES
             assert screen._cv_total == 342
             assert screen._cv_offset == 0
+            assert screen._cv_issues == _FAKE_CV_ISSUES  # add this line
 
