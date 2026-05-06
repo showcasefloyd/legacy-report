@@ -390,7 +390,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=fake_cv_issues),
+                  return_value={"results": fake_cv_issues, "total": 1, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.print_cv_issues_table") as mock_cv_table,
             patch("legacy_report.menu.inquirer.text", _text_mock(
                 "Spider-Man",  # search query
@@ -423,7 +423,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 1, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
@@ -480,7 +480,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 1, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
@@ -533,7 +533,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table") as mock_table,
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 1, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(

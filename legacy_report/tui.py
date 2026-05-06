@@ -600,6 +600,8 @@ class AddIssueScreen(Screen):
         self._step: str = _WIZARD_STEP_SEARCH
         self._volumes: list[dict] = []
         self._cv_issues: list[dict] = []
+        self._cv_offset: int = 0
+        self._cv_total: int = 0
         self._selected_volume: Optional[dict] = None
         self._selected_cv_issue: Optional[dict] = None
 
@@ -711,9 +713,10 @@ class AddIssueScreen(Screen):
             idx = event.cursor_row
             if 0 <= idx < len(self._volumes):
                 self._selected_volume = self._volumes[idx]
+                self._cv_offset = 0
                 self._show_loading()
                 self.run_worker(
-                    self._fetch_issues(str(self._selected_volume["id"])),
+                    self._fetch_issues(str(self._selected_volume["id"]), offset=0),
                     exclusive=True,
                 )
         elif self._step == _WIZARD_STEP_ISSUES:
@@ -760,23 +763,27 @@ class AddIssueScreen(Screen):
         self._show_step(_WIZARD_STEP_VOLUMES)
         table.focus()
 
-    async def _fetch_issues(self, volume_id: str) -> None:
+    async def _fetch_issues(self, volume_id: str, offset: int = 0) -> None:
         from legacy_report import comicvine
         try:
-            issues = await asyncio.to_thread(
-                comicvine.get_issues_for_volume, volume_id
+            page = await asyncio.to_thread(
+                comicvine.get_issues_for_volume, volume_id, offset
             )
         except Exception as e:
             self.notify(str(e), title="Fetch Failed", severity="error")
             self._show_step(_WIZARD_STEP_VOLUMES)
             return
 
-        if not issues:
+        issues = page["results"]
+        if not issues and offset == 0:
             self.notify("No issues found for this series.", severity="warning")
             self._show_step(_WIZARD_STEP_VOLUMES)
             return
 
         self._cv_issues = issues
+        self._cv_offset = offset
+        self._cv_total = page["total"]
+
         table = self.query_one("#wiz-issues-table", DataTable)
         table.clear(columns=True)
         table.add_columns("Issue #", "Story Title", "Cover Date")

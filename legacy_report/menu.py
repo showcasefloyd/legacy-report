@@ -400,7 +400,8 @@ def add_issue() -> None:
 
     print_info(f"Fetching issues for {selected_vol['name']}...")
     try:
-        cv_issues = comicvine.get_issues_for_volume(str(selected_vol["id"]))
+        _cv_page = comicvine.get_issues_for_volume(str(selected_vol["id"]))
+        cv_issues = _cv_page["results"]
     except Exception as e:
         print_error(f"Failed to fetch issues: {e}")
         return
