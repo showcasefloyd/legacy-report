@@ -613,6 +613,7 @@ class AddIssueScreen(Screen):
         self._cv_issues: list[dict] = []
         self._cv_offset: int = 0
         self._cv_total: int = 0
+        self._cv_limit: int = 100
         self._selected_volume: Optional[dict] = None
         self._selected_cv_issue: Optional[dict] = None
 
@@ -805,6 +806,7 @@ class AddIssueScreen(Screen):
         self._cv_total = page["total"]
 
         limit = page["limit"]
+        self._cv_limit = page["limit"]
         total_pages = (self._cv_total + limit - 1) // limit if self._cv_total else 1
         current_page = (offset // limit) + 1
         self.query_one("#wiz-page-label", Static).update(
@@ -943,7 +945,7 @@ class AddIssueScreen(Screen):
     def action_prev_page(self) -> None:
         if self._step != _WIZARD_STEP_ISSUES or self._cv_offset == 0:
             return
-        new_offset = self._cv_offset - 100
+        new_offset = self._cv_offset - self._cv_limit
         self._show_loading()
         self.run_worker(
             self._fetch_issues(str(self._selected_volume["id"]), offset=new_offset),
@@ -951,9 +953,9 @@ class AddIssueScreen(Screen):
         )
 
     def action_next_page(self) -> None:
-        if self._step != _WIZARD_STEP_ISSUES or self._cv_offset + 100 >= self._cv_total:
+        if self._step != _WIZARD_STEP_ISSUES or self._cv_offset + self._cv_limit >= self._cv_total:
             return
-        new_offset = self._cv_offset + 100
+        new_offset = self._cv_offset + self._cv_limit
         self._show_loading()
         self.run_worker(
             self._fetch_issues(str(self._selected_volume["id"]), offset=new_offset),

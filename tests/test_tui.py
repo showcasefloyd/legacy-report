@@ -808,3 +808,41 @@ async def test_prev_page_noop_on_first_page(mem_engine):
 
             assert screen._cv_offset == 0
 
+
+@pytest.mark.asyncio
+async def test_prev_page_fetches_offset_0(mem_engine):
+    """[ key on page 2 (offset=100) fetches back at offset=0."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+
+    page2 = {"results": _FAKE_CV_ISSUES, "total": 150, "offset": 100, "limit": 100}
+    page1 = {"results": _FAKE_CV_ISSUES, "total": 150, "offset": 0, "limit": 100}
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+            screen._selected_volume = _FAKE_VOLUMES[0]
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page2,
+            ):
+                screen.run_worker(screen._fetch_issues("42", offset=100), exclusive=True)
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._step == _WIZARD_STEP_ISSUES
+            assert screen._cv_offset == 100
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page1,
+            ):
+                await pilot.press("[")
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._cv_offset == 0
+
