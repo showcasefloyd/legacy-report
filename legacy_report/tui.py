@@ -792,7 +792,9 @@ class AddIssueScreen(Screen):
             )
         except Exception as e:
             self.notify(str(e), title="Fetch Failed", severity="error")
-            self._show_step(_WIZARD_STEP_VOLUMES)
+            self._show_step(
+                _WIZARD_STEP_ISSUES if offset > 0 else _WIZARD_STEP_VOLUMES
+            )
             return
 
         issues = page["results"]
