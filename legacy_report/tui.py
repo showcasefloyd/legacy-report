@@ -541,6 +541,11 @@ class AddIssueScreen(Screen):
         padding: 1 2;
         height: 1fr;
     }
+    AddIssueScreen #wiz-confirm-body {
+        padding: 1 2;
+        height: 1fr;
+        display: none;
+    }
     AddIssueScreen .wiz-prompt {
         height: 3;
         margin-bottom: 1;
@@ -632,51 +637,53 @@ class AddIssueScreen(Screen):
             # Step 2 & 3: results tables (hidden until needed)
             yield DataTable(id="wiz-volumes-table", cursor_type="row", zebra_stripes=True)
             yield DataTable(id="wiz-issues-table",  cursor_type="row", zebra_stripes=True)
-            with Horizontal(id="wiz-page-nav"):
-                yield Button("← Prev", id="btn-prev-page")
-                yield Static("", id="wiz-page-label")
-                yield Button("Next →", id="btn-next-page")
-            yield LoadingIndicator(id="wiz-loading")
-        # Step 4: confirm / edit fields (outside scrollable area to avoid layout issues)
-        yield Label("", id="lgy-hint")
-        yield Horizontal(
-            Label("Issue #",    classes="field-label"),
-            Input(id="wiz-issue-number",  classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("LGY #",      classes="field-label"),
-            Input(id="wiz-legacy-number", classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Pub Date",   classes="field-label"),
-            Input(id="wiz-pub-date",      classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Story",      classes="field-label"),
-            Input(id="wiz-story-title",   classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Writer",     classes="field-label"),
-            Input(id="wiz-writer",        classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Artist",     classes="field-label"),
-            Input(id="wiz-artist",        classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Rating 1-5", classes="field-label"),
-            Input(id="wiz-rating",        classes="field-input"),
-            classes="field-row",
-        )
-        with Horizontal(id="wiz-buttons"):
-            yield Button("Save  Ctrl+S", id="btn-wiz-save")
-            yield Button("Cancel  Esc",  id="btn-wiz-cancel")
+        # Page nav and loading live outside the scroll area so they're always visible
+        with Horizontal(id="wiz-page-nav"):
+            yield Button("← Prev", id="btn-prev-page")
+            yield Static("", id="wiz-page-label")
+            yield Button("Next →", id="btn-next-page")
+        yield LoadingIndicator(id="wiz-loading")
+        # Step 4: confirm / edit fields in their own scroll container
+        with ScrollableContainer(id="wiz-confirm-body"):
+            yield Label("", id="lgy-hint")
+            yield Horizontal(
+                Label("Issue #",    classes="field-label"),
+                Input(id="wiz-issue-number",  classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("LGY #",      classes="field-label"),
+                Input(id="wiz-legacy-number", classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Pub Date",   classes="field-label"),
+                Input(id="wiz-pub-date",      classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Story",      classes="field-label"),
+                Input(id="wiz-story-title",   classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Writer",     classes="field-label"),
+                Input(id="wiz-writer",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Artist",     classes="field-label"),
+                Input(id="wiz-artist",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Rating 1-5", classes="field-label"),
+                Input(id="wiz-rating",        classes="field-input"),
+                classes="field-row",
+            )
+            with Horizontal(id="wiz-buttons"):
+                yield Button("Save  Ctrl+S", id="btn-wiz-save")
+                yield Button("Cancel  Esc",  id="btn-wiz-cancel")
 
     def on_mount(self) -> None:
         self._show_step(_WIZARD_STEP_SEARCH)
@@ -689,13 +696,21 @@ class AddIssueScreen(Screen):
         self.query_one("#wiz-step-indicator", Label).update(_step_indicator_markup(step))
         self.query_one("#wiz-help", Label).update(_STEP_HELP.get(step, ""))
 
+        confirm = (step == _WIZARD_STEP_CONFIRM)
+
+        # Mutually exclusive body containers: only one is visible at a time.
+        # wiz-body holds search/tables (steps 1-3); wiz-confirm-body holds form
+        # fields (step 4). Hiding the inactive container prevents its 1fr height
+        # from consuming screen space that the active container needs.
+        self.query_one("#wiz-body").display         = not confirm
+        self.query_one("#wiz-confirm-body").display = confirm
+
         self.query_one("#wiz-search-input",  Input).display  = (step == _WIZARD_STEP_SEARCH)
         self.query_one("#wiz-volumes-table", DataTable).display = (step == _WIZARD_STEP_VOLUMES)
         self.query_one("#wiz-issues-table",  DataTable).display = (step == _WIZARD_STEP_ISSUES)
         self.query_one("#wiz-page-nav").display                 = (step == _WIZARD_STEP_ISSUES)
         self.query_one("#wiz-loading",       LoadingIndicator).display = False
 
-        confirm = (step == _WIZARD_STEP_CONFIRM)
         for wid in ("lgy-hint", "wiz-issue-number", "wiz-legacy-number",
                     "wiz-pub-date", "wiz-story-title", "wiz-writer",
                     "wiz-artist", "wiz-rating", "wiz-buttons"):
