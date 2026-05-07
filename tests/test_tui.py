@@ -127,6 +127,57 @@ async def test_sidebar_series_filter(seeded_engine):
 
 
 # ---------------------------------------------------------------------------
+# Sidebar keyboard navigation (issue #6)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_sidebar_arrow_keys_filter_in_realtime(seeded_engine):
+    """Arrow key navigation in the sidebar updates the right pane without Enter."""
+    with Session(seeded_engine) as session:
+        s2 = Series(title="X-Men", start_year=1991, publisher="Marvel")
+        session.add(s2)
+        session.commit()
+
+    with patch("legacy_report.tui.get_engine", return_value=seeded_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            table = app.query_one("#issues-table", DataTable)
+            lv = app.query_one("#series-list", ListView)
+
+            assert table.row_count == 1  # ALL: 1 issue (Amazing Spider-Man)
+
+            lv.focus()
+            await pilot.pause()
+            await pilot.press("down")   # → Amazing Spider-Man
+            await pilot.pause()
+            await pilot.press("down")   # → X-Men (0 issues)
+            await pilot.pause()
+
+            assert table.row_count == 0
+            assert "X-Men" in app.query_one("#main-title", Label).content
+
+
+@pytest.mark.asyncio
+async def test_sidebar_enter_filters_and_moves_focus_to_table(seeded_engine):
+    """Pressing Enter on a sidebar item filters the table and focuses the DataTable."""
+    with patch("legacy_report.tui.get_engine", return_value=seeded_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            table = app.query_one("#issues-table", DataTable)
+            lv = app.query_one("#series-list", ListView)
+
+            lv.focus()
+            await pilot.pause()
+            await pilot.press("down")   # → Amazing Spider-Man (index 1)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert "Amazing Spider-Man" in app.query_one("#main-title", Label).content
+            assert table.has_focus
+
+
+# ---------------------------------------------------------------------------
 # Live search / filter
 # ---------------------------------------------------------------------------
 

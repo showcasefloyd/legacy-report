@@ -1027,9 +1027,9 @@ class LegacyReportApp(App):
         background: #002200;
         color: #00ff41;
     }
-    ListView > ListItem.--highlight {
-        background: #004400;
-        color: #00ff41;
+    ListView > ListItem.-highlight {
+        background: #00ff41;
+        color: #000000;
         text-style: bold;
     }
     #main-pane { background: #0d0d0d; }
@@ -1252,8 +1252,8 @@ class LegacyReportApp(App):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        item_id = event.item.id or ""
+    def _apply_sidebar_item(self, item) -> None:
+        item_id = item.id or ""
         if item_id == "item-all":
             self._load_issues(_ALL_SERIES_ID)
         elif item_id.startswith("item-"):
@@ -1261,6 +1261,15 @@ class LegacyReportApp(App):
                 self._load_issues(int(item_id.split("-", 1)[1]))
             except (ValueError, IndexError):
                 pass
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        lv = self.query_one("#series-list", ListView)
+        if not lv.has_focus or event.item is None:
+            return
+        self._apply_sidebar_item(event.item)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self._apply_sidebar_item(event.item)
         self.query_one("#issues-table", DataTable).focus()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
