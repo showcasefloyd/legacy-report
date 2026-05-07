@@ -699,3 +699,112 @@ async def test_fetch_issues_stores_total_and_offset(mem_engine):
             assert screen._cv_offset == 0
             assert screen._cv_issues == _FAKE_CV_ISSUES
 
+
+@pytest.mark.asyncio
+async def test_next_page_fetches_offset_100(mem_engine):
+    """] key on the issues step fetches the next page at offset=100."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+
+    page1 = {"results": _FAKE_CV_ISSUES, "total": 150, "offset": 0, "limit": 100}
+    page2 = {"results": _FAKE_CV_ISSUES, "total": 150, "offset": 100, "limit": 100}
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+            screen._selected_volume = _FAKE_VOLUMES[0]
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page1,
+            ):
+                screen.run_worker(screen._fetch_issues("42", offset=0), exclusive=True)
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._step == _WIZARD_STEP_ISSUES
+            assert screen._cv_offset == 0
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page2,
+            ):
+                await pilot.press("]")
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._cv_offset == 100
+
+
+@pytest.mark.asyncio
+async def test_next_page_noop_on_last_page(mem_engine):
+    """] key on the last page does not trigger another fetch."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+
+    # total=50 means one page; offset+100 >= 50 so next is disabled
+    page1 = {"results": _FAKE_CV_ISSUES, "total": 50, "offset": 0, "limit": 100}
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+            screen._selected_volume = _FAKE_VOLUMES[0]
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page1,
+            ):
+                screen.run_worker(screen._fetch_issues("42", offset=0), exclusive=True)
+                for _ in range(5):
+                    await pilot.pause()
+
+            assert screen._step == _WIZARD_STEP_ISSUES
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume"
+            ) as mock_fetch:
+                await pilot.press("]")
+                for _ in range(5):
+                    await pilot.pause()
+                mock_fetch.assert_not_called()
+
+            assert screen._cv_offset == 0
+
+
+@pytest.mark.asyncio
+async def test_prev_page_noop_on_first_page(mem_engine):
+    """[ key on page 1 does not trigger another fetch."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+
+    page1 = {"results": _FAKE_CV_ISSUES, "total": 342, "offset": 0, "limit": 100}
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+            screen._selected_volume = _FAKE_VOLUMES[0]
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume",
+                return_value=page1,
+            ):
+                screen.run_worker(screen._fetch_issues("42", offset=0), exclusive=True)
+                for _ in range(5):
+                    await pilot.pause()
+
+            with patch(
+                "legacy_report.comicvine.get_issues_for_volume"
+            ) as mock_fetch:
+                await pilot.press("[")
+                for _ in range(5):
+                    await pilot.pause()
+                mock_fetch.assert_not_called()
+
+            assert screen._cv_offset == 0
+

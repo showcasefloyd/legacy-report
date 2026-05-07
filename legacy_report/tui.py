@@ -481,7 +481,7 @@ _WIZARD_STEPS = [
 _STEP_HELP = {
     _WIZARD_STEP_SEARCH:  "  Type a title and press Enter ↵  ·  Esc exits",
     _WIZARD_STEP_VOLUMES: "  ↑ ↓ navigate  ·  Enter ↵ to select a series  ·  Esc to go back",
-    _WIZARD_STEP_ISSUES:  "  ↑ ↓ navigate  ·  Enter ↵ to select an issue  ·  Esc to go back",
+    _WIZARD_STEP_ISSUES:  "  ↑ ↓ navigate  ·  Enter ↵ to select an issue  ·  [ ] page  ·  Esc to go back",
     _WIZARD_STEP_CONFIRM: "  Edit any field  ·  Ctrl+S to save  ·  Esc to go back",
 }
 
@@ -509,6 +509,8 @@ class AddIssueScreen(Screen):
     BINDINGS = [
         Binding("escape", "go_back_or_cancel", "Back / Cancel"),
         Binding("ctrl+s", "save_issue", "Save", show=False),
+        Binding("[", "prev_page", "Prev Page", show=False),
+        Binding("]", "next_page", "Next Page", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -593,6 +595,15 @@ class AddIssueScreen(Screen):
         height: 1;
         margin-bottom: 1;
     }
+    AddIssueScreen #wiz-page-nav {
+        height: 3;
+        align: center middle;
+    }
+    AddIssueScreen #wiz-page-label {
+        width: 1fr;
+        content-align: center middle;
+        color: #00aa22;
+    }
     """
 
     def __init__(self) -> None:
@@ -619,6 +630,10 @@ class AddIssueScreen(Screen):
             # Step 2 & 3: results tables (hidden until needed)
             yield DataTable(id="wiz-volumes-table", cursor_type="row", zebra_stripes=True)
             yield DataTable(id="wiz-issues-table",  cursor_type="row", zebra_stripes=True)
+            with Horizontal(id="wiz-page-nav"):
+                yield Button("← Prev", id="btn-prev-page")
+                yield Static("", id="wiz-page-label")
+                yield Button("Next →", id="btn-next-page")
             yield LoadingIndicator(id="wiz-loading")
             # Step 4: confirm / edit fields (hidden until needed)
             yield Label("", id="lgy-hint")
@@ -675,6 +690,7 @@ class AddIssueScreen(Screen):
         self.query_one("#wiz-search-input",  Input).display  = (step == _WIZARD_STEP_SEARCH)
         self.query_one("#wiz-volumes-table", DataTable).display = (step == _WIZARD_STEP_VOLUMES)
         self.query_one("#wiz-issues-table",  DataTable).display = (step == _WIZARD_STEP_ISSUES)
+        self.query_one("#wiz-page-nav").display                 = (step == _WIZARD_STEP_ISSUES)
         self.query_one("#wiz-loading",       LoadingIndicator).display = False
 
         confirm = (step == _WIZARD_STEP_CONFIRM)
@@ -687,7 +703,7 @@ class AddIssueScreen(Screen):
                 pass
 
     def _show_loading(self) -> None:
-        for wid in ("wiz-search-input", "wiz-volumes-table", "wiz-issues-table"):
+        for wid in ("wiz-search-input", "wiz-volumes-table", "wiz-issues-table", "wiz-page-nav"):
             self.query_one(f"#{wid}").display = False
         self.query_one("#wiz-loading", LoadingIndicator).display = True
 
@@ -730,6 +746,10 @@ class AddIssueScreen(Screen):
             self.action_save_issue()
         elif event.button.id == "btn-wiz-cancel":
             self.app.pop_screen()
+        elif event.button.id == "btn-prev-page":
+            self.action_prev_page()
+        elif event.button.id == "btn-next-page":
+            self.action_next_page()
 
     # ── Workers ───────────────────────────────────────────────────────────────
 
@@ -783,6 +803,15 @@ class AddIssueScreen(Screen):
         self._cv_issues = issues
         self._cv_offset = offset
         self._cv_total = page["total"]
+
+        limit = page["limit"]
+        total_pages = (self._cv_total + limit - 1) // limit if self._cv_total else 1
+        current_page = (offset // limit) + 1
+        self.query_one("#wiz-page-label", Static).update(
+            f"Page {current_page} of {total_pages} ({self._cv_total} issues)"
+        )
+        self.query_one("#btn-prev-page", Button).disabled = (offset == 0)
+        self.query_one("#btn-next-page", Button).disabled = (offset + limit >= self._cv_total)
 
         table = self.query_one("#wiz-issues-table", DataTable)
         table.clear(columns=True)
@@ -910,6 +939,26 @@ class AddIssueScreen(Screen):
                 self.query_one("#wiz-volumes-table", DataTable).focus()
             elif step_order[idx - 1] == _WIZARD_STEP_ISSUES:
                 self.query_one("#wiz-issues-table", DataTable).focus()
+
+    def action_prev_page(self) -> None:
+        if self._step != _WIZARD_STEP_ISSUES or self._cv_offset == 0:
+            return
+        new_offset = self._cv_offset - 100
+        self._show_loading()
+        self.run_worker(
+            self._fetch_issues(str(self._selected_volume["id"]), offset=new_offset),
+            exclusive=True,
+        )
+
+    def action_next_page(self) -> None:
+        if self._step != _WIZARD_STEP_ISSUES or self._cv_offset + 100 >= self._cv_total:
+            return
+        new_offset = self._cv_offset + 100
+        self._show_loading()
+        self.run_worker(
+            self._fetch_issues(str(self._selected_volume["id"]), offset=new_offset),
+            exclusive=True,
+        )
 
 
 # ── Main app ──────────────────────────────────────────────────────────────────
