@@ -1,6 +1,7 @@
 """
 Main menu and all TUI flows for Legacy Report.
 """
+import math
 from datetime import datetime, date
 from fractions import Fraction
 from typing import Optional
@@ -413,7 +414,7 @@ def add_issue() -> None:
     cv_page = 0
     selected_iss = None
     cv_total = _cv_page["total"]
-    cv_total_pages = max(1, (cv_total + PAGE_SIZE - 1) // PAGE_SIZE)
+    cv_total_pages = max(1, math.ceil(len(cv_issues) / PAGE_SIZE))
 
     while True:
         cv_start = cv_page * PAGE_SIZE
