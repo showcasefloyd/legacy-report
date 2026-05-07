@@ -6,7 +6,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     "comicvine_api_key": "",
-    "cache_ttl_hours": 24,
+    "cache_ttl_hours": 12,
     "db_path": "~/.local/share/legacy-report/collection.db",
 }
 

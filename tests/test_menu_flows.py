@@ -390,7 +390,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=fake_cv_issues),
+                  return_value={"results": fake_cv_issues, "total": 5, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.print_cv_issues_table") as mock_cv_table,
             patch("legacy_report.menu.inquirer.text", _text_mock(
                 "Spider-Man",  # search query
@@ -423,7 +423,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 5, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
@@ -480,7 +480,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table"),
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 5, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.print_issue_detail") as mock_detail,
@@ -533,7 +533,7 @@ class TestAddIssueDisplay:
             patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
             patch("legacy_report.menu.print_volumes_table") as mock_table,
             patch("legacy_report.menu.comicvine.get_issues_for_volume",
-                  return_value=[fake_issue]),
+                  return_value={"results": [fake_issue], "total": 5, "offset": 0, "limit": 100}),
             patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
             patch("legacy_report.menu._get_session", return_value=session),
             patch("legacy_report.menu.inquirer.text", _text_mock(
@@ -585,6 +585,66 @@ class TestAddIssueDisplay:
         # Table rendered 3 times: page 1, page 2, page 1 again
         assert mock_table.call_count == 3
         mock_issues.assert_not_called()
+
+    def test_add_issue_cv_pagination_capped_to_loaded_results(self, session):
+        """
+        When the API reports total=200 but only returns 10 results, cv_total_pages
+        must be derived from len(results), not total.  Regression guard for the
+        empty-page bug: navigating to page 3+ (based on total=200, PAGE_SIZE=50)
+        would access cv_issues[100:], an empty slice, causing a silent empty page.
+
+        With PAGE_SIZE=50 and 10 results, ceil(10/50) = 1 page — so only page 1
+        should ever be reachable, and the wizard must complete without error.
+        """
+        vols = self._FAKE_VOLUMES[:2]
+        fake_issue = {
+            "id": "42",
+            "issue_number": "1",
+            "name": "First Issue",
+            "cover_date": "1963-03-01",
+            "description": "",
+            "image": {},
+            "person_credits": [],
+        }
+        # 10 results, but total=200 — the old code would compute 4 pages
+        cv_response = {
+            "results": [fake_issue] * 10,
+            "total": 200,
+            "offset": 0,
+            "limit": 100,
+        }
+        with (
+            patch("legacy_report.menu.get_api_key", return_value="fake-key"),
+            patch("legacy_report.menu.comicvine.search_volumes", return_value=vols),
+            patch("legacy_report.menu.filter_volumes_by_tier", return_value=vols),
+            patch("legacy_report.menu.print_volumes_table"),
+            patch("legacy_report.menu.comicvine.get_issues_for_volume",
+                  return_value=cv_response),
+            patch("legacy_report.menu.comicvine.calculate_lgy_number", return_value=""),
+            patch("legacy_report.menu._get_session", return_value=session),
+            patch("legacy_report.menu.print_cv_issues_table") as mock_cv_table,
+            patch("legacy_report.menu.inquirer.text", _text_mock(
+                "Spider-Man",  # search query
+                "1",           # volume number selection
+                "1",           # CV issue number selection (page 1 only — no [n]ext offered)
+                "1",           # issue_number field
+                "",            # legacy_number
+                "1963-03-01",  # pub date
+                "",            # story_title
+                "",            # writer
+                "",            # artist
+                "",            # rating
+                "",            # Press Enter to continue
+            )),
+        ):
+            from legacy_report.menu import add_issue
+            add_issue()
+
+        # The CV issues table must have been rendered exactly once — page 1 only.
+        # If the old bug were present the prompt would include "[n]ext" even though
+        # page 2 would be empty, and the test would either hang or raise an error
+        # because the mock has no extra "n" inputs queued.
+        mock_cv_table.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

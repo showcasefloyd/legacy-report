@@ -87,18 +87,24 @@ def search_volumes(query: str) -> list:
     return data.get("results", [])
 
 
-def get_issues_for_volume(volume_id: str) -> list:
-    """Get all issues for a given ComicVine volume ID."""
+def get_issues_for_volume(volume_id: str, offset: int = 0, limit: int = 100) -> dict:
+    """Get one page of issues for a given ComicVine volume ID."""
     data = _fetch(
         "issues",
         {
             "filter": f"volume:{volume_id}",
             "field_list": "id,name,issue_number,cover_date,description,person_credits,image",
             "sort": "cover_date:asc",
-            "limit": 100,
+            "limit": limit,
+            "offset": offset,
         },
     )
-    return data.get("results", [])
+    return {
+        "results": data.get("results", []),
+        "total": data.get("number_of_total_results", 0),
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 def calculate_lgy_number(selected_volume: dict, issue_number: str) -> Optional[str]:

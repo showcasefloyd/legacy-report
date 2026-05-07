@@ -1,6 +1,7 @@
 """
 Main menu and all TUI flows for Legacy Report.
 """
+import math
 from datetime import datetime, date
 from fractions import Fraction
 from typing import Optional
@@ -400,7 +401,8 @@ def add_issue() -> None:
 
     print_info(f"Fetching issues for {selected_vol['name']}...")
     try:
-        cv_issues = comicvine.get_issues_for_volume(str(selected_vol["id"]))
+        _cv_page = comicvine.get_issues_for_volume(str(selected_vol["id"]))
+        cv_issues = _cv_page["results"]
     except Exception as e:
         print_error(f"Failed to fetch issues: {e}")
         return
@@ -411,8 +413,8 @@ def add_issue() -> None:
 
     cv_page = 0
     selected_iss = None
-    cv_total = len(cv_issues)
-    cv_total_pages = max(1, (cv_total + PAGE_SIZE - 1) // PAGE_SIZE)
+    cv_total = _cv_page["total"]
+    cv_total_pages = max(1, math.ceil(len(cv_issues) / PAGE_SIZE))
 
     while True:
         cv_start = cv_page * PAGE_SIZE
