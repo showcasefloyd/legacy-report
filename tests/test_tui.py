@@ -609,6 +609,45 @@ async def test_fetch_issues_worker_advances_to_step3(mem_engine):
 
 
 @pytest.mark.asyncio
+async def test_pagination_buttons_visible_on_issues_step(mem_engine):
+    """On ISSUES step, pagination buttons are visible and form fields are hidden."""
+    from legacy_report.tui import _WIZARD_STEP_ISSUES
+    from textual.widgets import Button
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            # Transition to ISSUES step with mock data
+            screen._volumes = _FAKE_VOLUMES
+            screen._selected_volume = _FAKE_VOLUMES[0]
+            screen._cv_issues = _FAKE_CV_ISSUES
+            screen._cv_total = 100
+            screen._cv_offset = 0
+
+            screen._show_step(_WIZARD_STEP_ISSUES)
+            await pilot.pause()
+
+            # Pagination buttons must be visible
+            page_nav = screen.query_one("#wiz-page-nav")
+            assert page_nav.display is True
+            prev_btn = screen.query_one("#btn-prev-page", Button)
+            assert prev_btn.display is True
+            next_btn = screen.query_one("#btn-next-page", Button)
+            assert next_btn.display is True
+
+            # Form fields must be hidden (not consuming layout space)
+            for wid in ("lgy-hint", "wiz-issue-number", "wiz-legacy-number",
+                        "wiz-pub-date", "wiz-story-title", "wiz-writer",
+                        "wiz-artist", "wiz-rating", "wiz-buttons"):
+                widget = screen.query_one(f"#{wid}")
+                assert widget.display is False, f"{wid} should be hidden on ISSUES step"
+
+
+@pytest.mark.asyncio
 async def test_wizard_back_navigation(mem_engine):
     """Escape on step 2 returns to step 1 without leaving AddIssueScreen."""
     from legacy_report.tui import _WIZARD_STEP_SEARCH, _WIZARD_STEP_VOLUMES

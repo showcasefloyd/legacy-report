@@ -594,6 +594,7 @@ class AddIssueScreen(Screen):
         color: #00aa22;
         height: 1;
         margin-bottom: 1;
+        padding: 0 2;
     }
     AddIssueScreen #wiz-page-nav {
         height: 3;
@@ -636,46 +637,46 @@ class AddIssueScreen(Screen):
                 yield Static("", id="wiz-page-label")
                 yield Button("Next →", id="btn-next-page")
             yield LoadingIndicator(id="wiz-loading")
-            # Step 4: confirm / edit fields (hidden until needed)
-            yield Label("", id="lgy-hint")
-            yield Horizontal(
-                Label("Issue #",    classes="field-label"),
-                Input(id="wiz-issue-number",  classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("LGY #",      classes="field-label"),
-                Input(id="wiz-legacy-number", classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("Pub Date",   classes="field-label"),
-                Input(id="wiz-pub-date",      classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("Story",      classes="field-label"),
-                Input(id="wiz-story-title",   classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("Writer",     classes="field-label"),
-                Input(id="wiz-writer",        classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("Artist",     classes="field-label"),
-                Input(id="wiz-artist",        classes="field-input"),
-                classes="field-row",
-            )
-            yield Horizontal(
-                Label("Rating 1-5", classes="field-label"),
-                Input(id="wiz-rating",        classes="field-input"),
-                classes="field-row",
-            )
-            with Horizontal(id="wiz-buttons"):
-                yield Button("Save  Ctrl+S", id="btn-wiz-save")
-                yield Button("Cancel  Esc",  id="btn-wiz-cancel")
+        # Step 4: confirm / edit fields (outside scrollable area to avoid layout issues)
+        yield Label("", id="lgy-hint")
+        yield Horizontal(
+            Label("Issue #",    classes="field-label"),
+            Input(id="wiz-issue-number",  classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("LGY #",      classes="field-label"),
+            Input(id="wiz-legacy-number", classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("Pub Date",   classes="field-label"),
+            Input(id="wiz-pub-date",      classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("Story",      classes="field-label"),
+            Input(id="wiz-story-title",   classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("Writer",     classes="field-label"),
+            Input(id="wiz-writer",        classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("Artist",     classes="field-label"),
+            Input(id="wiz-artist",        classes="field-input"),
+            classes="field-row",
+        )
+        yield Horizontal(
+            Label("Rating 1-5", classes="field-label"),
+            Input(id="wiz-rating",        classes="field-input"),
+            classes="field-row",
+        )
+        with Horizontal(id="wiz-buttons"):
+            yield Button("Save  Ctrl+S", id="btn-wiz-save")
+            yield Button("Cancel  Esc",  id="btn-wiz-cancel")
 
     def on_mount(self) -> None:
         self._show_step(_WIZARD_STEP_SEARCH)
