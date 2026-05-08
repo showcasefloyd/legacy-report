@@ -127,6 +127,57 @@ async def test_sidebar_series_filter(seeded_engine):
 
 
 # ---------------------------------------------------------------------------
+# Sidebar keyboard navigation (issue #6)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_sidebar_arrow_keys_filter_in_realtime(seeded_engine):
+    """Arrow key navigation in the sidebar updates the right pane without Enter."""
+    with Session(seeded_engine) as session:
+        s2 = Series(title="X-Men", start_year=1991, publisher="Marvel")
+        session.add(s2)
+        session.commit()
+
+    with patch("legacy_report.tui.get_engine", return_value=seeded_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            table = app.query_one("#issues-table", DataTable)
+            lv = app.query_one("#series-list", ListView)
+
+            assert table.row_count == 1  # ALL: 1 issue (Amazing Spider-Man)
+
+            lv.focus()
+            await pilot.pause()
+            await pilot.press("down")   # → Amazing Spider-Man
+            await pilot.pause()
+            await pilot.press("down")   # → X-Men (0 issues)
+            await pilot.pause()
+
+            assert table.row_count == 0
+            assert "X-Men" in app.query_one("#main-title", Label).content
+
+
+@pytest.mark.asyncio
+async def test_sidebar_enter_filters_and_moves_focus_to_table(seeded_engine):
+    """Pressing Enter on a sidebar item filters the table and focuses the DataTable."""
+    with patch("legacy_report.tui.get_engine", return_value=seeded_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            app = pilot.app
+            table = app.query_one("#issues-table", DataTable)
+            lv = app.query_one("#series-list", ListView)
+
+            lv.focus()
+            await pilot.pause()
+            await pilot.press("down")   # → Amazing Spider-Man (index 1)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert "Amazing Spider-Man" in app.query_one("#main-title", Label).content
+            assert table.has_focus
+
+
+# ---------------------------------------------------------------------------
 # Live search / filter
 # ---------------------------------------------------------------------------
 
@@ -645,6 +696,104 @@ async def test_pagination_buttons_visible_on_issues_step(mem_engine):
                         "wiz-artist", "wiz-rating", "wiz-buttons"):
                 widget = screen.query_one(f"#{wid}")
                 assert widget.display is False, f"{wid} should be hidden on ISSUES step"
+
+
+@pytest.mark.asyncio
+async def test_confirm_step_hides_wiz_body(mem_engine):
+    """On CONFIRM step wiz-body (1fr container) must be hidden.
+
+    Root cause of issue #12 regression: wiz-body kept height:1fr even with all
+    its children hidden, leaving no space for the form fields placed after it.
+    """
+    from legacy_report.tui import _WIZARD_STEP_CONFIRM
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            screen._selected_volume = {
+                "id": 1, "name": "Test", "start_year": 1963,
+                "publisher": {"name": "Marvel"},
+            }
+            screen._selected_cv_issue = {
+                "id": 1, "issue_number": "1", "name": "Test",
+                "cover_date": "1963-01-01", "person_credits": [],
+            }
+            screen._show_step(_WIZARD_STEP_CONFIRM)
+            await pilot.pause()
+
+            assert screen.query_one("#wiz-body").display is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_step_shows_confirm_body(mem_engine):
+    """On CONFIRM step wiz-confirm-body (dedicated form scroll container) is visible."""
+    from legacy_report.tui import _WIZARD_STEP_CONFIRM
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            screen._selected_volume = {
+                "id": 1, "name": "Test", "start_year": 1963,
+                "publisher": {"name": "Marvel"},
+            }
+            screen._selected_cv_issue = {
+                "id": 1, "issue_number": "1", "name": "Test",
+                "cover_date": "1963-01-01", "person_credits": [],
+            }
+            screen._show_step(_WIZARD_STEP_CONFIRM)
+            await pilot.pause()
+
+            assert screen.query_one("#wiz-confirm-body").display is True
+
+
+@pytest.mark.asyncio
+async def test_non_confirm_steps_hide_confirm_body(mem_engine):
+    """On SEARCH/VOLUMES/ISSUES steps wiz-body is visible and wiz-confirm-body is hidden."""
+    from legacy_report.tui import _WIZARD_STEP_SEARCH, _WIZARD_STEP_ISSUES
+
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            screen._show_step(_WIZARD_STEP_SEARCH)
+            await pilot.pause()
+            assert screen.query_one("#wiz-body").display is True
+            assert screen.query_one("#wiz-confirm-body").display is False
+
+            screen._show_step(_WIZARD_STEP_ISSUES)
+            await pilot.pause()
+            assert screen.query_one("#wiz-body").display is True
+            assert screen.query_one("#wiz-confirm-body").display is False
+
+
+@pytest.mark.asyncio
+async def test_page_nav_outside_wiz_body(mem_engine):
+    """wiz-page-nav must not be a child of the wiz-body ScrollableContainer.
+
+    When inside the scroll area a large DataTable pushes the nav buttons out of
+    the visible viewport, requiring the user to scroll to page.
+    """
+    with patch("legacy_report.tui.get_engine", return_value=mem_engine):
+        async with LegacyReportApp().run_test(headless=True) as pilot:
+            await pilot.app.action_do_add()
+            await pilot.pause()
+            screen = pilot.app.screen
+            assert isinstance(screen, AddIssueScreen)
+
+            page_nav = screen.query_one("#wiz-page-nav")
+            wiz_body = screen.query_one("#wiz-body")
+            assert page_nav.parent is not wiz_body
 
 
 @pytest.mark.asyncio

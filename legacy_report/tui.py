@@ -541,6 +541,11 @@ class AddIssueScreen(Screen):
         padding: 1 2;
         height: 1fr;
     }
+    AddIssueScreen #wiz-confirm-body {
+        padding: 1 2;
+        height: 1fr;
+        display: none;
+    }
     AddIssueScreen .wiz-prompt {
         height: 3;
         margin-bottom: 1;
@@ -632,51 +637,53 @@ class AddIssueScreen(Screen):
             # Step 2 & 3: results tables (hidden until needed)
             yield DataTable(id="wiz-volumes-table", cursor_type="row", zebra_stripes=True)
             yield DataTable(id="wiz-issues-table",  cursor_type="row", zebra_stripes=True)
-            with Horizontal(id="wiz-page-nav"):
-                yield Button("← Prev", id="btn-prev-page")
-                yield Static("", id="wiz-page-label")
-                yield Button("Next →", id="btn-next-page")
-            yield LoadingIndicator(id="wiz-loading")
-        # Step 4: confirm / edit fields (outside scrollable area to avoid layout issues)
-        yield Label("", id="lgy-hint")
-        yield Horizontal(
-            Label("Issue #",    classes="field-label"),
-            Input(id="wiz-issue-number",  classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("LGY #",      classes="field-label"),
-            Input(id="wiz-legacy-number", classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Pub Date",   classes="field-label"),
-            Input(id="wiz-pub-date",      classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Story",      classes="field-label"),
-            Input(id="wiz-story-title",   classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Writer",     classes="field-label"),
-            Input(id="wiz-writer",        classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Artist",     classes="field-label"),
-            Input(id="wiz-artist",        classes="field-input"),
-            classes="field-row",
-        )
-        yield Horizontal(
-            Label("Rating 1-5", classes="field-label"),
-            Input(id="wiz-rating",        classes="field-input"),
-            classes="field-row",
-        )
-        with Horizontal(id="wiz-buttons"):
-            yield Button("Save  Ctrl+S", id="btn-wiz-save")
-            yield Button("Cancel  Esc",  id="btn-wiz-cancel")
+        # Page nav and loading live outside the scroll area so they're always visible
+        with Horizontal(id="wiz-page-nav"):
+            yield Button("← Prev", id="btn-prev-page")
+            yield Static("", id="wiz-page-label")
+            yield Button("Next →", id="btn-next-page")
+        yield LoadingIndicator(id="wiz-loading")
+        # Step 4: confirm / edit fields in their own scroll container
+        with ScrollableContainer(id="wiz-confirm-body"):
+            yield Label("", id="lgy-hint")
+            yield Horizontal(
+                Label("Issue #",    classes="field-label"),
+                Input(id="wiz-issue-number",  classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("LGY #",      classes="field-label"),
+                Input(id="wiz-legacy-number", classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Pub Date",   classes="field-label"),
+                Input(id="wiz-pub-date",      classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Story",      classes="field-label"),
+                Input(id="wiz-story-title",   classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Writer",     classes="field-label"),
+                Input(id="wiz-writer",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Artist",     classes="field-label"),
+                Input(id="wiz-artist",        classes="field-input"),
+                classes="field-row",
+            )
+            yield Horizontal(
+                Label("Rating 1-5", classes="field-label"),
+                Input(id="wiz-rating",        classes="field-input"),
+                classes="field-row",
+            )
+            with Horizontal(id="wiz-buttons"):
+                yield Button("Save  Ctrl+S", id="btn-wiz-save")
+                yield Button("Cancel  Esc",  id="btn-wiz-cancel")
 
     def on_mount(self) -> None:
         self._show_step(_WIZARD_STEP_SEARCH)
@@ -689,13 +696,21 @@ class AddIssueScreen(Screen):
         self.query_one("#wiz-step-indicator", Label).update(_step_indicator_markup(step))
         self.query_one("#wiz-help", Label).update(_STEP_HELP.get(step, ""))
 
+        confirm = (step == _WIZARD_STEP_CONFIRM)
+
+        # Mutually exclusive body containers: only one is visible at a time.
+        # wiz-body holds search/tables (steps 1-3); wiz-confirm-body holds form
+        # fields (step 4). Hiding the inactive container prevents its 1fr height
+        # from consuming screen space that the active container needs.
+        self.query_one("#wiz-body").display         = not confirm
+        self.query_one("#wiz-confirm-body").display = confirm
+
         self.query_one("#wiz-search-input",  Input).display  = (step == _WIZARD_STEP_SEARCH)
         self.query_one("#wiz-volumes-table", DataTable).display = (step == _WIZARD_STEP_VOLUMES)
         self.query_one("#wiz-issues-table",  DataTable).display = (step == _WIZARD_STEP_ISSUES)
         self.query_one("#wiz-page-nav").display                 = (step == _WIZARD_STEP_ISSUES)
         self.query_one("#wiz-loading",       LoadingIndicator).display = False
 
-        confirm = (step == _WIZARD_STEP_CONFIRM)
         for wid in ("lgy-hint", "wiz-issue-number", "wiz-legacy-number",
                     "wiz-pub-date", "wiz-story-title", "wiz-writer",
                     "wiz-artist", "wiz-rating", "wiz-buttons"):
@@ -1012,9 +1027,9 @@ class LegacyReportApp(App):
         background: #002200;
         color: #00ff41;
     }
-    ListView > ListItem.--highlight {
-        background: #004400;
-        color: #00ff41;
+    ListView > ListItem.-highlight {
+        background: #00ff41;
+        color: #000000;
         text-style: bold;
     }
     #main-pane { background: #0d0d0d; }
@@ -1237,15 +1252,33 @@ class LegacyReportApp(App):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        item_id = event.item.id or ""
+    def _apply_sidebar_item(self, item) -> None:
+        item_id = item.id or ""
+        target_series_id = None
+        
         if item_id == "item-all":
-            self._load_issues(_ALL_SERIES_ID)
+            target_series_id = _ALL_SERIES_ID
         elif item_id.startswith("item-"):
             try:
-                self._load_issues(int(item_id.split("-", 1)[1]))
+                target_series_id = int(item_id.split("-", 1)[1])
             except (ValueError, IndexError):
-                pass
+                return
+        
+        # Short-circuit if already viewing this series
+        if target_series_id is not None and target_series_id == self._current_series_id:
+            return
+        
+        if target_series_id is not None:
+            self._load_issues(target_series_id)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        lv = self.query_one("#series-list", ListView)
+        if not lv.has_focus or event.item is None:
+            return
+        self._apply_sidebar_item(event.item)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self._apply_sidebar_item(event.item)
         self.query_one("#issues-table", DataTable).focus()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
