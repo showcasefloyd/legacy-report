@@ -1239,13 +1239,22 @@ class LegacyReportApp(App):
 
     def _apply_sidebar_item(self, item) -> None:
         item_id = item.id or ""
+        target_series_id = None
+        
         if item_id == "item-all":
-            self._load_issues(_ALL_SERIES_ID)
+            target_series_id = _ALL_SERIES_ID
         elif item_id.startswith("item-"):
             try:
-                self._load_issues(int(item_id.split("-", 1)[1]))
+                target_series_id = int(item_id.split("-", 1)[1])
             except (ValueError, IndexError):
-                pass
+                return
+        
+        # Short-circuit if already viewing this series
+        if target_series_id is not None and target_series_id == self._current_series_id:
+            return
+        
+        if target_series_id is not None:
+            self._load_issues(target_series_id)
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         lv = self.query_one("#series-list", ListView)
